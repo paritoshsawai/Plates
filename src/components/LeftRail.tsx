@@ -24,7 +24,7 @@ export function LeftRail({ onEditPlot }: Props) {
   const edges = plotEdgeLengthsFt(plot);
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col gap-5 overflow-y-auto border-r border-slate-200 bg-white p-4">
+    <aside className="flex w-full shrink-0 flex-col gap-5 border-t border-slate-200 bg-white p-4 lg:w-60 lg:overflow-y-auto lg:border-t-0 lg:border-r">
       <section>
         <SectionTitle>Tools</SectionTitle>
         <div className="grid gap-1.5">

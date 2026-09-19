@@ -13,7 +13,13 @@ import { serializePlan } from './core/plan';
 import { validatePlan } from './core/validation';
 import { toWorkOrder } from './core/workorder';
 import { bomToCsv } from './export/csv';
-import { downloadBlob, downloadDataUrl, slugify } from './export/download';
+import {
+  copyText,
+  downloadBlob,
+  downloadDataUrl,
+  downloadsAreBlocked,
+  slugify,
+} from './export/download';
 import { useStore } from './state/store';
 
 type Dialog = 'plot' | 'pricing' | 'plans' | null;
@@ -134,6 +140,29 @@ export default function App() {
     }
   }, []);
 
+  /**
+   * Hand a text export to the user by whichever route the host allows: a file
+   * when the page can save one, the clipboard when it is embedded and the
+   * sandbox blocks downloads. Either way the control reports what happened
+   * instead of appearing to do nothing.
+   */
+  const deliverText = useCallback(
+    async (label: string, text: string, filename: string, mime: string) => {
+      if (!downloadsAreBlocked()) {
+        downloadBlob(new Blob([text], { type: mime }), filename);
+        return;
+      }
+      const copied = await copyText(text);
+      notify(
+        copied
+          ? `${label} copied to the clipboard. This embedded view cannot save files.`
+          : `${label} could not be saved: this embedded view blocks downloads and clipboard access. Open the app in its own tab.`,
+        copied ? 'info' : 'error',
+      );
+    },
+    [notify],
+  );
+
   const exports: ExportActions = useMemo(
     () => ({
       png() {
@@ -142,9 +171,20 @@ export default function App() {
           notify('The drawing could not be captured.', 'error');
           return;
         }
+        if (downloadsAreBlocked()) {
+          notify('This embedded view cannot save images. Open the app in its own tab.', 'error');
+          return;
+        }
         downloadDataUrl(image, `${slugify(plan.name)}-plan.png`);
       },
       async pdf() {
+        if (downloadsAreBlocked()) {
+          notify(
+            'This embedded view cannot save PDFs. Open the app in its own tab, or export the BOM as CSV.',
+            'error',
+          );
+          return;
+        }
         // jsPDF is a third of the bundle and only the quote needs it, so it
         // loads on demand rather than on first paint.
         const planImage = capturePlanImage();
@@ -159,15 +199,19 @@ export default function App() {
         }
       },
       csv() {
-        downloadBlob(
-          new Blob([bomToCsv(plan, bom)], { type: 'text/csv;charset=utf-8' }),
+        void deliverText(
+          'BOM CSV',
+          bomToCsv(plan, bom),
           `${slugify(plan.name)}-bom.csv`,
+          'text/csv;charset=utf-8',
         );
       },
       planJson() {
-        downloadBlob(
-          new Blob([serializePlan(plan)], { type: 'application/json' }),
+        void deliverText(
+          'Plan JSON',
+          serializePlan(plan),
           `${slugify(plan.name)}-plan.json`,
+          'application/json',
         );
       },
       workOrderJson() {
@@ -175,19 +219,21 @@ export default function App() {
           notify('Resolve the layout errors before issuing a work order.', 'error');
           return;
         }
-        downloadBlob(
-          new Blob([JSON.stringify(toWorkOrder(plan, bom), null, 2)], {
-            type: 'application/json',
-          }),
+        void deliverText(
+          'Work order JSON',
+          JSON.stringify(toWorkOrder(plan, bom), null, 2),
           `${slugify(plan.name)}-work-order.json`,
+          'application/json',
         );
       },
     }),
-    [plan, bom, priceConfig, validation, capturePlanImage, notify],
+    [plan, bom, priceConfig, validation, capturePlanImage, notify, deliverText],
   );
 
   return (
-    <div className="flex h-screen flex-col bg-slate-100 text-slate-900">
+    // Full height on a desktop so the canvas fills the screen; on a narrow
+    // screen the rails stack under the drawing and the page scrolls instead.
+    <div className="flex min-h-full flex-col bg-slate-100 text-slate-900 lg:h-full">
       <TopBar
         exports={exports}
         onOpenPlans={() => setDialog('plans')}
@@ -198,9 +244,9 @@ export default function App() {
         }}
       />
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {role !== 'client' && <LeftRail onEditPlot={() => setDialog('plot')} />}
-        <main className="min-w-0 flex-1">
+        <main className="order-first min-h-[55vh] min-w-0 flex-1 lg:order-none lg:min-h-0">
           <DesignCanvas validation={validation} stageRef={stageRef} />
         </main>
         <RightRail

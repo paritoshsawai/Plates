@@ -18,7 +18,7 @@ export function RightRail({ bom, validation, onEditPricing }: Props) {
   const setTool = useStore((s) => s.setTool);
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col gap-5 overflow-y-auto border-l border-slate-200 bg-white p-4">
+    <aside className="flex w-full shrink-0 flex-col gap-5 border-t border-slate-200 bg-white p-4 lg:w-80 lg:overflow-y-auto lg:border-t-0 lg:border-l">
       <section>
         <SectionTitle>Status</SectionTitle>
         <StatusBadge validation={validation} />
