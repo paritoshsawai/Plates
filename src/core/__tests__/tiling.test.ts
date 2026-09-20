@@ -93,7 +93,7 @@ describe('tileRun', () => {
   it('lays panels end to end along +X with no gap or overlap', () => {
     const panels = tileRun(0, 0, ftToUnits(10), 'h');
     expect(panels).not.toBeNull();
-    expect(panels!.map((p) => [p.type, p.x, p.y])).toEqual([
+    expect(panels!.map((p) => [p.size, p.x, p.y])).toEqual([
       ['4x10', 0, 0],
       ['4x10', 2, 0],
       ['2x10', 4, 0],
@@ -102,7 +102,7 @@ describe('tileRun', () => {
 
   it('lays panels along +Y when vertical', () => {
     const panels = tileRun(3, 1, ftToUnits(6), 'v');
-    expect(panels!.map((p) => [p.type, p.x, p.y])).toEqual([
+    expect(panels!.map((p) => [p.size, p.x, p.y])).toEqual([
       ['4x10', 3, 1],
       ['2x10', 3, 3],
     ]);

@@ -1,4 +1,4 @@
-import { PANEL_CATALOG } from '../core/panels';
+import { CATEGORY_STYLE, PANEL_CATALOG, PLACEABLE_CATEGORIES } from '../core/panels';
 import { GRID_FT, WALL_HEIGHT_FT, formatFt } from '../core/units';
 import { plotAreaSqFt, plotEdgeLengthsFt } from '../core/plot';
 import { useStore } from '../state/store';
@@ -13,6 +13,8 @@ export function LeftRail({ onEditPlot }: Props) {
   const setTool = useStore((s) => s.setTool);
   const brush = useStore((s) => s.brush);
   const setBrush = useStore((s) => s.setBrush);
+  const activeCategory = useStore((s) => s.activeCategory);
+  const setActiveCategory = useStore((s) => s.setActiveCategory);
   const plot = useStore((s) => s.plan.plot);
   const role = useStore((s) => s.role);
   const selectionCount = useStore((s) => s.selection.length);
@@ -52,7 +54,36 @@ export function LeftRail({ onEditPlot }: Props) {
       </section>
 
       <section>
-        <SectionTitle>Panels</SectionTitle>
+        <SectionTitle>Category</SectionTitle>
+        <div className="grid gap-1.5">
+          {PLACEABLE_CATEGORIES.map((category) => (
+            <button
+              key={category}
+              type="button"
+              disabled={readOnly}
+              onClick={() => setActiveCategory(category)}
+              className={`flex items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                activeCategory === category
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              <span
+                className="h-3 w-3 shrink-0 rounded-sm"
+                style={{ backgroundColor: CATEGORY_STYLE[category].color }}
+              />
+              <span className="text-sm text-slate-700">{CATEGORY_STYLE[category].plural}</span>
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-slate-500">
+          Colour marks the category; length marks the size. Floor and roof panels arrive with the
+          area-tiling layer.
+        </p>
+      </section>
+
+      <section>
+        <SectionTitle>Size</SectionTitle>
         <div className="grid gap-1.5">
           {PANEL_CATALOG.map((spec) => (
             <button
@@ -71,7 +102,10 @@ export function LeftRail({ onEditPlot }: Props) {
             >
               <span
                 className="h-3 shrink-0 rounded-sm"
-                style={{ backgroundColor: spec.color, width: spec.widthFt * 6 }}
+                style={{
+                  backgroundColor: CATEGORY_STYLE[activeCategory].color,
+                  width: spec.widthFt * 6,
+                }}
               />
               <span className="text-sm text-slate-700">{spec.label}</span>
             </button>

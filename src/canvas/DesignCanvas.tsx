@@ -4,14 +4,21 @@ import type Konva from 'konva';
 import { GridLayer } from './GridLayer';
 import { PlotShape } from './PlotShape';
 import { PanelShape } from './PanelShape';
-import { BrushPreview, IssueMarkers, RunDimensions, WallPreview } from './Annotations';
+import {
+  BrushPreview,
+  IssueMarkers,
+  JunctionMarkers,
+  RunDimensions,
+  WallPreview,
+} from './Annotations';
 import { COLORS, fitToBox, nearestEdge, nearestNode, visibleUnits, zoomAt } from './view';
 import type { Viewport } from './view';
 import { plotBboxUnits } from '../core/plot';
 import { isInsidePlot, wouldOverlap } from '../core/validation';
 import { newPanelId } from '../core/panels';
+import { detectJunctions } from '../core/junctions';
 import { useStore } from '../state/store';
-import type { GridEdge, GridPoint, ValidationResult } from '../core/types';
+import type { GridEdge, GridPoint, Panel, ValidationResult } from '../core/types';
 
 interface Props {
   validation: ValidationResult;
@@ -29,6 +36,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
   const plan = useStore((s) => s.plan);
   const tool = useStore((s) => s.tool);
   const brush = useStore((s) => s.brush);
+  const activeCategory = useStore((s) => s.activeCategory);
   const selection = useStore((s) => s.selection);
   const wallAnchor = useStore((s) => s.wallAnchor);
   const setWallAnchor = useStore((s) => s.setWallAnchor);
@@ -40,6 +48,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
   const notify = useStore((s) => s.notify);
 
   const selectedIds = useMemo(() => new Set(selection), [selection]);
+  const junctions = useMemo(() => detectJunctions(plan.panels), [plan.panels]);
 
   useLayoutEffect(() => {
     const element = containerRef.current;
@@ -129,9 +138,10 @@ export function DesignCanvas({ validation, stageRef }: Props) {
 
     if (tool === 'panel') {
       const edge = nearestEdge(point.x, point.y);
-      const candidate = {
+      const candidate: Panel = {
         id: newPanelId(),
-        type: brush,
+        category: activeCategory,
+        size: brush,
         x: edge.x,
         y: edge.y,
         orientation: edge.axis,
@@ -219,13 +229,24 @@ export function DesignCanvas({ validation, stageRef }: Props) {
         </Layer>
 
         <Layer listening={false}>
+          <JunctionMarkers junctions={junctions} scale={viewport.scale} />
           <RunDimensions panels={plan.panels} scale={viewport.scale} />
           <IssueMarkers issues={validation.errors} scale={viewport.scale} />
           {tool === 'wall' && (
-            <WallPreview anchor={wallAnchor} cursor={hoverNode} scale={viewport.scale} />
+            <WallPreview
+              anchor={wallAnchor}
+              cursor={hoverNode}
+              category={activeCategory}
+              scale={viewport.scale}
+            />
           )}
           {tool === 'panel' && (
-            <BrushPreview edge={hoverEdge} type={brush} scale={viewport.scale} />
+            <BrushPreview
+              edge={hoverEdge}
+              size={brush}
+              category={activeCategory}
+              scale={viewport.scale}
+            />
           )}
         </Layer>
       </Stage>

@@ -53,7 +53,7 @@ describe('validatePlan', () => {
   });
 
   it('detects a panel that leaves the plot', () => {
-    const outside: Panel = { id: 'out', type: '4x10', x: 30, y: 30, orientation: 'h' };
+    const outside: Panel = { id: 'out', category: 'wall', size: '4x10', x: 30, y: 30, orientation: 'h' };
     const result = validatePlan([...closedRoom(20, 16), outside], plot);
     expect(result.errors.some((e) => e.code === 'outside-plot')).toBe(true);
     expect(result.flaggedPanelIds.has('out')).toBe(true);
@@ -65,7 +65,7 @@ describe('validatePlan', () => {
   });
 
   it('flags a lone stub wall at both ends', () => {
-    const stub: Panel[] = [{ id: 's', type: '4x10', x: 2, y: 2, orientation: 'h' }];
+    const stub: Panel[] = [{ id: 's', category: 'wall', size: '4x10', x: 2, y: 2, orientation: 'h' }];
     const result = validatePlan(stub, plot);
     const openEnds = result.errors.filter((e) => e.code === 'open-end');
     expect(openEnds).toHaveLength(2);
@@ -85,7 +85,7 @@ describe('validatePlan', () => {
       // first room's right wall, which is exactly the overlap the engine catches.
       (p, i, all) =>
         all.findIndex(
-          (q) => q.x === p.x && q.y === p.y && q.orientation === p.orientation && q.type === p.type,
+          (q) => q.x === p.x && q.y === p.y && q.orientation === p.orientation && q.size === p.size,
         ) === i,
     );
     const result = validatePlan(panels, plot);
@@ -93,14 +93,14 @@ describe('validatePlan', () => {
     expect(result.manufacturable).toBe(true);
   });
 
-  it('rejects a panel type that is not manufactured', () => {
-    const bogus = { id: 'b', type: '6x10', x: 0, y: 0, orientation: 'h' } as unknown as Panel;
+  it('rejects a panel size that is not manufactured', () => {
+    const bogus = { id: 'b', category: 'wall', size: '6x10', x: 0, y: 0, orientation: 'h' } as unknown as Panel;
     const result = validatePlan([bogus], plot);
     expect(result.errors[0].code).toBe('unknown-panel');
   });
 
   it('rejects an off-grid coordinate from an imported plan', () => {
-    const offGrid = { id: 'o', type: '4x10', x: 1.5, y: 0, orientation: 'h' } as Panel;
+    const offGrid = { id: 'o', category: 'wall', size: '4x10', x: 1.5, y: 0, orientation: 'h' } as Panel;
     const result = validatePlan([offGrid], plot);
     expect(result.errors[0].code).toBe('off-grid');
   });
@@ -109,23 +109,23 @@ describe('validatePlan', () => {
 /** The pre-placement guards the canvas uses to refuse a drop. */
 describe('wouldOverlap', () => {
   // A 4 ft panel spanning grid edges 0 and 1 along y = 0.
-  const existing: Panel[] = [{ id: 'a', type: '4x10', x: 0, y: 0, orientation: 'h' }];
+  const existing: Panel[] = [{ id: 'a', category: 'wall', size: '4x10', x: 0, y: 0, orientation: 'h' }];
 
   it('rejects a panel landing on an occupied segment', () => {
-    expect(wouldOverlap(existing, { id: 'b', type: '2x10', x: 0, y: 0, orientation: 'h' })).toBe(true);
-    expect(wouldOverlap(existing, { id: 'b', type: '2x10', x: 1, y: 0, orientation: 'h' })).toBe(true);
+    expect(wouldOverlap(existing, { id: 'b', category: 'wall', size: '2x10', x: 0, y: 0, orientation: 'h' })).toBe(true);
+    expect(wouldOverlap(existing, { id: 'b', category: 'wall', size: '2x10', x: 1, y: 0, orientation: 'h' })).toBe(true);
   });
 
   it('rejects a 4 ft panel that only partly overlaps', () => {
-    expect(wouldOverlap(existing, { id: 'b', type: '4x10', x: 1, y: 0, orientation: 'h' })).toBe(true);
+    expect(wouldOverlap(existing, { id: 'b', category: 'wall', size: '4x10', x: 1, y: 0, orientation: 'h' })).toBe(true);
   });
 
   it('accepts a panel butting up against the existing one', () => {
-    expect(wouldOverlap(existing, { id: 'b', type: '4x10', x: 2, y: 0, orientation: 'h' })).toBe(false);
+    expect(wouldOverlap(existing, { id: 'b', category: 'wall', size: '4x10', x: 2, y: 0, orientation: 'h' })).toBe(false);
   });
 
   it('accepts a perpendicular panel sharing only a node', () => {
-    expect(wouldOverlap(existing, { id: 'b', type: '4x10', x: 0, y: 0, orientation: 'v' })).toBe(false);
+    expect(wouldOverlap(existing, { id: 'b', category: 'wall', size: '4x10', x: 0, y: 0, orientation: 'v' })).toBe(false);
   });
 
   it('ignores the panel being moved, so a no-op drag is not an overlap', () => {
@@ -135,16 +135,16 @@ describe('wouldOverlap', () => {
 
 describe('isInsidePlot', () => {
   it('accepts a panel lying along the boundary', () => {
-    expect(isInsidePlot(plot, { id: 'a', type: '4x10', x: 0, y: 0, orientation: 'h' })).toBe(true);
+    expect(isInsidePlot(plot, { id: 'a', category: 'wall', size: '4x10', x: 0, y: 0, orientation: 'h' })).toBe(true);
   });
 
   it('rejects a panel that starts before the origin', () => {
-    expect(isInsidePlot(plot, { id: 'a', type: '4x10', x: 0, y: -1, orientation: 'v' })).toBe(false);
+    expect(isInsidePlot(plot, { id: 'a', category: 'wall', size: '4x10', x: 0, y: -1, orientation: 'v' })).toBe(false);
   });
 
   it('rejects a panel whose far end leaves the plot', () => {
     // The 40 ft plot is 20 units wide; a 4 ft panel starting at 19 runs to 21.
-    expect(isInsidePlot(plot, { id: 'a', type: '4x10', x: 19, y: 0, orientation: 'h' })).toBe(false);
-    expect(isInsidePlot(plot, { id: 'a', type: '2x10', x: 19, y: 0, orientation: 'h' })).toBe(true);
+    expect(isInsidePlot(plot, { id: 'a', category: 'wall', size: '4x10', x: 19, y: 0, orientation: 'h' })).toBe(false);
+    expect(isInsidePlot(plot, { id: 'a', category: 'wall', size: '2x10', x: 19, y: 0, orientation: 'h' })).toBe(true);
   });
 });

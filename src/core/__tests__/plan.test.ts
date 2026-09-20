@@ -33,12 +33,42 @@ describe('plan serialisation', () => {
     expect(restored.schemaVersion).toBe(PLAN_SCHEMA_VERSION);
   });
 
+  it('migrates a schema 1 plan, where every panel was a wall', () => {
+    // Schema 1 stored the size as `type` and had no category at all.
+    const v1 = JSON.stringify({
+      schemaVersion: 1,
+      name: 'Old plan',
+      plot: { vertices: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }] },
+      panels: [{ id: 'a', type: '4x10', x: 0, y: 0, orientation: 'h' }],
+    });
+    const plan = deserializePlan(v1);
+
+    expect(plan.schemaVersion).toBe(PLAN_SCHEMA_VERSION);
+    expect(plan.panels[0]).toMatchObject({ category: 'wall', size: '4x10' });
+  });
+
+  it('rejects a category that is not a known one', () => {
+    const raw = JSON.stringify({
+      plot: { vertices: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }] },
+      panels: [{ id: 'a', category: 'ceiling', size: '4x10', x: 0, y: 0, orientation: 'h' }],
+    });
+    expect(() => deserializePlan(raw)).toThrow(/unsupported category/);
+  });
+
+  it('round-trips a non-wall category', () => {
+    const plan = createPlan('Mixed');
+    plan.panels = [
+      { id: 'a', category: 'roof', size: '4x10', x: 0, y: 0, orientation: 'h' },
+    ];
+    expect(deserializePlan(serializePlan(plan)).panels[0].category).toBe('roof');
+  });
+
   it('accepts the rotation form as well as the orientation form', () => {
     const raw = JSON.stringify({
       plot: { vertices: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }] },
       panels: [
-        { id: 'a', type: '4x10', x: 0, y: 0, rotation: 0 },
-        { id: 'b', type: '2x10', x: 0, y: 0, rotation: 90 },
+        { id: 'a', size: '4x10', x: 0, y: 0, rotation: 0 },
+        { id: 'b', size: '2x10', x: 0, y: 0, rotation: 90 },
       ],
     });
     const plan = deserializePlan(raw);
@@ -48,7 +78,7 @@ describe('plan serialisation', () => {
   it('rejects a panel size Arplace does not manufacture', () => {
     const raw = JSON.stringify({
       plot: { vertices: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }] },
-      panels: [{ id: 'a', type: '6x10', x: 0, y: 0, orientation: 'h' }],
+      panels: [{ id: 'a', category: 'wall', size: '6x10', x: 0, y: 0, orientation: 'h' }],
     });
     expect(() => deserializePlan(raw)).toThrow(PlanParseError);
   });
@@ -56,7 +86,7 @@ describe('plan serialisation', () => {
   it('rejects off-grid coordinates instead of silently accepting them', () => {
     const raw = JSON.stringify({
       plot: { vertices: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }] },
-      panels: [{ id: 'a', type: '4x10', x: 0.5, y: 0, orientation: 'h' }],
+      panels: [{ id: 'a', category: 'wall', size: '4x10', x: 0.5, y: 0, orientation: 'h' }],
     });
     expect(() => deserializePlan(raw)).toThrow(/integer grid unit/);
   });
@@ -65,8 +95,8 @@ describe('plan serialisation', () => {
     const raw = JSON.stringify({
       plot: { vertices: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }] },
       panels: [
-        { id: 'a', type: '4x10', x: 0, y: 0, orientation: 'h' },
-        { id: 'a', type: '4x10', x: 2, y: 0, orientation: 'h' },
+        { id: 'a', category: 'wall', size: '4x10', x: 0, y: 0, orientation: 'h' },
+        { id: 'a', category: 'wall', size: '4x10', x: 2, y: 0, orientation: 'h' },
       ],
     });
     expect(() => deserializePlan(raw)).toThrow(/Duplicate panel id/);
@@ -96,13 +126,18 @@ describe('toWorkOrder', () => {
     const bom = buildBom(plan.panels, DEFAULT_PRICE_CONFIG);
     const order = toWorkOrder(plan, bom);
 
+    // The factory list now names the category of every line, and the corner
+    // hardware the layout needs arrives alongside the panels.
     expect(order.materials).toEqual([
-      { sku: '4x10', description: 'Wall panel 4 ft x 10 ft', qty: 18 },
+      { category: 'wall', sku: '4x10', description: 'Wall panel 4 ft x 10 ft', qty: 18 },
+      { category: 'connector', sku: 'corner', description: 'Corner connector', qty: 4 },
     ]);
     expect(order.site.wallLinearFt).toBe(72);
     expect(order.site.wallHeightFt).toBe(10);
     expect(order.pricing.effectiveDate).toBe(DEFAULT_PRICE_CONFIG.effectiveDate);
-    expect(order.pricing.total).toBe(18 * 20);
+    expect(order.pricing.panels).toBe(18 * 20);
+    expect(order.pricing.connectors).toBe(bom.cost.connectors);
+    expect(order.pricing.total).toBe(18 * 20 + bom.cost.connectors);
     expect(order.status).toBe('draft');
   });
 

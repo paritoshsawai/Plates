@@ -5,38 +5,111 @@ import {
   formatCurrencyAscii,
   isPlaceholderPricing,
   normalizePriceConfig,
+  priceDateOf,
+  priceOf,
+  setPrice,
   toPdfSafeText,
 } from '../pricing';
 
-describe('normalizePriceConfig', () => {
-  it('fills in a missing config with the seeded defaults', () => {
-    expect(normalizePriceConfig(null)).toEqual(DEFAULT_PRICE_CONFIG);
+describe('the seeded schedule', () => {
+  it('prices every category separately even where the footprint matches', () => {
+    // A roof panel and a wall panel are both 4 ft x 10 ft but are different
+    // assemblies, so they must be independently addressable rows.
+    for (const category of ['wall', 'floor', 'roof', 'door', 'window'] as const) {
+      expect(priceOf(DEFAULT_PRICE_CONFIG, category, '4x10')).toBe(20);
+      expect(priceOf(DEFAULT_PRICE_CONFIG, category, '2x10')).toBe(10);
+    }
   });
 
-  it('does not share the panel price object with the defaults', () => {
+  it('seeds a row for each junction type', () => {
+    for (const type of ['corner', 't-junction', 'cross'] as const) {
+      expect(priceOf(DEFAULT_PRICE_CONFIG, 'connector', type)).toBeGreaterThan(0);
+    }
+  });
+
+  it('prices an unknown SKU at zero rather than throwing', () => {
+    expect(priceOf(DEFAULT_PRICE_CONFIG, 'wall', '6x10')).toBe(0);
+  });
+});
+
+describe('setPrice', () => {
+  it('changes one row without disturbing the same size in another category', () => {
+    const rows = setPrice(DEFAULT_PRICE_CONFIG, 'roof', '4x10', 4200);
+    const config = { ...DEFAULT_PRICE_CONFIG, rows };
+    expect(priceOf(config, 'roof', '4x10')).toBe(4200);
+    expect(priceOf(config, 'wall', '4x10')).toBe(20);
+    expect(priceOf(config, 'roof', '2x10')).toBe(10);
+  });
+
+  it('adds a row that does not exist yet', () => {
+    const rows = setPrice(DEFAULT_PRICE_CONFIG, 'wall', '6x10', 99);
+    expect(priceOf({ ...DEFAULT_PRICE_CONFIG, rows }, 'wall', '6x10')).toBe(99);
+  });
+});
+
+describe('normalizePriceConfig', () => {
+  it('fills in a missing config with the seeded defaults', () => {
+    expect(normalizePriceConfig(null).rows).toEqual(DEFAULT_PRICE_CONFIG.rows);
+  });
+
+  it('does not share row objects with the defaults', () => {
     const config = normalizePriceConfig(null);
-    config.panelUnitPrice['4x10'] = 999;
-    expect(DEFAULT_PRICE_CONFIG.panelUnitPrice['4x10']).toBe(20);
+    config.rows[0].unitPrice = 999;
+    expect(priceOf(DEFAULT_PRICE_CONFIG, 'wall', '4x10')).toBe(20);
+  });
+
+  it('migrates a pre-category schedule into the wall rows', () => {
+    // Schedules saved before categories existed priced by size alone, and
+    // every panel back then was a wall.
+    const config = normalizePriceConfig({
+      effectiveDate: '2026-04-01',
+      panelUnitPrice: { '4x10': 3500, '2x10': 2100 },
+    } as never);
+
+    expect(priceOf(config, 'wall', '4x10')).toBe(3500);
+    expect(priceOf(config, 'wall', '2x10')).toBe(2100);
+    // The categories that schedule never knew about fall back to the seeds.
+    expect(priceOf(config, 'roof', '4x10')).toBe(20);
+    expect(config.effectiveDate).toBe('2026-04-01');
+  });
+
+  it('keeps a row schedule intact and seeds anything missing from it', () => {
+    const config = normalizePriceConfig({
+      effectiveDate: '2026-04-01',
+      rows: [{ category: 'roof', size: '4x10', unitPrice: 4200 }],
+    });
+    expect(priceOf(config, 'roof', '4x10')).toBe(4200);
+    expect(priceOf(config, 'wall', '4x10')).toBe(20);
   });
 
   it('rejects negative and non-numeric prices from storage', () => {
     const config = normalizePriceConfig({
-      panelUnitPrice: { '4x10': -50, '2x10': 'abc' as unknown as number },
+      rows: [
+        { category: 'wall', size: '4x10', unitPrice: -50 },
+        { category: 'wall', size: '2x10', unitPrice: 'abc' as unknown as number },
+      ],
       taxPercent: -1,
     });
-    expect(config.panelUnitPrice['4x10']).toBe(20);
-    expect(config.panelUnitPrice['2x10']).toBe(10);
+    expect(priceOf(config, 'wall', '4x10')).toBe(20);
+    expect(priceOf(config, 'wall', '2x10')).toBe(10);
     expect(config.taxPercent).toBe(0);
   });
+});
 
-  it('keeps a real schedule intact', () => {
+describe('priceDateOf', () => {
+  it('falls back to the schedule date', () => {
+    expect(priceDateOf(DEFAULT_PRICE_CONFIG, 'wall', '4x10')).toBe(
+      DEFAULT_PRICE_CONFIG.effectiveDate,
+    );
+  });
+
+  it('lets one row carry its own date, so a single SKU can be re-priced', () => {
     const config = normalizePriceConfig({
-      effectiveDate: '2026-04-01',
-      panelUnitPrice: { '4x10': 3500, '2x10': 2100 },
-      taxPercent: 18,
+      effectiveDate: '2026-01-01',
+      rows: [{ category: 'roof', size: '4x10', unitPrice: 4200, effectiveDate: '2026-06-01' }],
     });
-    expect(config.panelUnitPrice).toEqual({ '4x10': 3500, '2x10': 2100 });
-    expect(config.taxPercent).toBe(18);
+    expect(priceDateOf(config, 'roof', '4x10')).toBe('2026-06-01');
+    expect(priceDateOf(config, 'wall', '4x10')).toBe('2026-01-01');
   });
 });
 

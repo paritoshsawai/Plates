@@ -1,6 +1,6 @@
 /** CSV export of the bill of materials. */
 
-import { getPanelSpec } from '../core/panels';
+import { lineLinearFt } from '../core/bom';
 import { plotAreaSqFt } from '../core/plot';
 import { WALL_HEIGHT_FT } from '../core/units';
 import type { Bom, Plan } from '../core/types';
@@ -28,24 +28,30 @@ export function bomToCsv(plan: Plan, bom: Bom): string {
   lines.push(row(['Wall length (linear ft)', bom.utilization.linearFt]));
   lines.push('');
 
-  lines.push(row(['SKU', 'Description', 'Qty', 'Linear ft', 'Unit price', 'Line total']));
-  for (const line of bom.lines) {
-    lines.push(
-      row([
-        line.sku,
-        line.description,
-        line.qty,
-        getPanelSpec(line.sku).widthFt * line.qty,
-        line.unitPrice,
-        line.lineTotal,
-      ]),
-    );
+  lines.push(row(['Category', 'SKU', 'Description', 'Qty', 'Linear ft', 'Unit price', 'Line total']));
+  for (const group of bom.groups) {
+    for (const line of group.lines) {
+      lines.push(
+        row([
+          line.category,
+          line.sku,
+          line.description,
+          line.qty,
+          lineLinearFt(line) ?? '',
+          line.unitPrice,
+          line.lineTotal,
+        ]),
+      );
+    }
+    lines.push(row(['', '', `${group.label} subtotal`, group.qty, '', '', group.subtotal]));
   }
-  lines.push(row(['', 'Total panels', bom.totalPanels, bom.utilization.linearFt, '', bom.cost.panels]));
+  lines.push(row(['', '', 'Total panels', bom.totalPanels, bom.utilization.linearFt, '', bom.cost.panels]));
+  lines.push(row(['', '', 'Total connectors', bom.totalConnectors, '', '', bom.cost.connectors]));
   lines.push('');
 
   lines.push(row(['Cost component', 'Amount']));
   lines.push(row(['Panels', bom.cost.panels]));
+  lines.push(row(['Connectors', bom.cost.connectors]));
   lines.push(row(['Labor', bom.cost.labor]));
   lines.push(row(['Transport', bom.cost.transport]));
   lines.push(row(['Tax', bom.cost.tax]));

@@ -7,7 +7,7 @@
  * near-miss geometry.
  */
 
-import { isKnownPanelType, panelEdges, panelEndNode } from './panels';
+import { isKnownCategory, isKnownPanelSize, panelEdges, panelEndNode } from './panels';
 import { containsSegment } from './plot';
 import { unitsToFt } from './units';
 import { buildEdgeIndex, buildNodeIndex, countComponents } from './walls';
@@ -37,11 +37,20 @@ export function validatePlan(panels: Panel[], plot: Plot): ValidationResult {
   // 1. Integrity of the panels themselves. Placement cannot produce these, but
   //    an imported or hand-edited plan JSON can.
   for (const panel of panels) {
-    if (!isKnownPanelType(panel.type)) {
+    if (!isKnownPanelSize(panel.size)) {
       issues.push({
         code: 'unknown-panel',
         severity: 'error',
-        message: `Panel ${panel.id} has type "${panel.type}", which Arplace does not manufacture.`,
+        message: `Panel ${panel.id} is size "${panel.size}", which Arplace does not manufacture.`,
+        panelIds: [panel.id],
+      });
+      continue;
+    }
+    if (!isKnownCategory(panel.category)) {
+      issues.push({
+        code: 'unknown-panel',
+        severity: 'error',
+        message: `Panel ${panel.id} has category "${panel.category}", which is not a known category.`,
         panelIds: [panel.id],
       });
       continue;

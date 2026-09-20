@@ -33,10 +33,18 @@ export function buildEdgeIndex(panels: Panel[]): EdgeIndex {
   return { byEdge, edges };
 }
 
+/** Which way an occupied edge leaves a node. */
+export type Direction = 'north' | 'south' | 'east' | 'west';
+
 export interface NodeInfo {
   point: GridPoint;
   /** Number of distinct occupied edges incident to this node. */
   degree: number;
+  /**
+   * The directions those edges leave in. Degree alone cannot tell a corner
+   * from a straight run - both are 2 - so the junction classifier needs these.
+   */
+  directions: Set<Direction>;
   /** Panels touching this node, for highlighting. */
   panelIds: Set<string>;
 }
@@ -51,14 +59,22 @@ export interface NodeInfo {
 export function buildNodeIndex(panels: Panel[], index: EdgeIndex): Map<string, NodeInfo> {
   const nodes = new Map<string, NodeInfo>();
 
-  const touch = (x: number, y: number, panelId: string, countsAsDegree: boolean) => {
+  const touch = (
+    x: number,
+    y: number,
+    panelId: string,
+    direction: Direction | null,
+  ) => {
     const key = nodeKey(x, y);
     let info = nodes.get(key);
     if (!info) {
-      info = { point: { x, y }, degree: 0, panelIds: new Set() };
+      info = { point: { x, y }, degree: 0, directions: new Set(), panelIds: new Set() };
       nodes.set(key, info);
     }
-    if (countsAsDegree) info.degree += 1;
+    if (direction) {
+      info.degree += 1;
+      info.directions.add(direction);
+    }
     info.panelIds.add(panelId);
   };
 
@@ -67,17 +83,22 @@ export function buildNodeIndex(panels: Panel[], index: EdgeIndex): Map<string, N
   for (const [key, claimants] of index.byEdge) {
     const edge = index.edges.get(key)!;
     const owner = claimants[0];
-    touch(edge.x, edge.y, owner, true);
-    if (edge.axis === 'h') touch(edge.x + 1, edge.y, owner, true);
-    else touch(edge.x, edge.y + 1, owner, true);
+    if (edge.axis === 'h') {
+      // The edge runs east from (x, y) and arrives from the west at (x+1, y).
+      touch(edge.x, edge.y, owner, 'east');
+      touch(edge.x + 1, edge.y, owner, 'west');
+    } else {
+      touch(edge.x, edge.y, owner, 'south');
+      touch(edge.x, edge.y + 1, owner, 'north');
+    }
   }
 
   // Attribute every panel to the nodes it spans, so an issue at a node can
   // highlight all the panels a user would need to look at.
   for (const panel of panels) {
-    touch(panel.x, panel.y, panel.id, false);
+    touch(panel.x, panel.y, panel.id, null);
     const end = panelEndNode(panel);
-    touch(end.x, end.y, panel.id, false);
+    touch(end.x, end.y, panel.id, null);
   }
 
   return nodes;

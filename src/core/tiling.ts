@@ -15,8 +15,8 @@
  * and the quotes stay correct.
  */
 
-import { DENOMINATION_TYPES, DENOMINATIONS_UNITS, getPanelSpec, newPanelId } from './panels';
-import type { Orientation, Panel, PanelTypeId } from './types';
+import { DENOMINATION_SIZES, DENOMINATIONS_UNITS, getPanelSpec, newPanelId } from './panels';
+import type { Orientation, Panel, PanelCategory, PanelSizeId } from './types';
 
 export interface Tiling {
   /** Counts aligned to the denominations array passed in, largest first. */
@@ -136,12 +136,12 @@ export function minPanelCount(lengthUnits: number): number | null {
  * The optimal tiling as an ordered list of panel types, widest first, ready to
  * lay along a wall run. A remainder panel therefore lands at the far end.
  */
-export function tilingSequence(lengthUnits: number): PanelTypeId[] | null {
+export function tilingSequence(lengthUnits: number): PanelSizeId[] | null {
   const tiling = minPanelTiling(lengthUnits);
   if (!tiling) return null;
-  const sequence: PanelTypeId[] = [];
+  const sequence: PanelSizeId[] = [];
   tiling.counts.forEach((count, i) => {
-    for (let n = 0; n < count; n++) sequence.push(DENOMINATION_TYPES[i]);
+    for (let n = 0; n < count; n++) sequence.push(DENOMINATION_SIZES[i]);
   });
   return sequence;
 }
@@ -156,21 +156,23 @@ export function tileRun(
   y: number,
   lengthUnits: number,
   orientation: Orientation,
+  category: PanelCategory = 'wall',
 ): Panel[] | null {
   const sequence = tilingSequence(lengthUnits);
   if (!sequence) return null;
 
   const panels: Panel[] = [];
   let cursor = 0;
-  for (const type of sequence) {
+  for (const size of sequence) {
     panels.push({
       id: newPanelId(),
-      type,
+      category,
+      size,
       x: orientation === 'h' ? x + cursor : x,
       y: orientation === 'h' ? y : y + cursor,
       orientation,
     });
-    cursor += getPanelSpec(type).widthUnits;
+    cursor += getPanelSpec(size).widthUnits;
   }
   return panels;
 }

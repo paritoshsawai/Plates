@@ -2,9 +2,10 @@ import { Fragment } from 'react';
 import { Circle, Line, Rect, Text } from 'react-konva';
 import { buildEdgeIndex, collinearRuns } from '../core/walls';
 import { minPanelCount, tilingSequence } from '../core/tiling';
-import { getPanelSpec } from '../core/panels';
+import { categoryColor, getPanelSpec } from '../core/panels';
 import { formatFt, unitsToFt } from '../core/units';
-import type { GridPoint, Panel, ValidationIssue } from '../core/types';
+import type { GridPoint, Panel, PanelCategory, PanelSizeId, ValidationIssue } from '../core/types';
+import type { Junction } from '../core/junctions';
 import { COLORS, PX_PER_UNIT, WALL_PX } from './view';
 
 interface DimensionProps {
@@ -84,9 +85,41 @@ export function IssueMarkers({ issues, scale }: IssueProps) {
   );
 }
 
+interface JunctionProps {
+  junctions: Junction[];
+  scale: number;
+}
+
+/**
+ * A small square post at every detected junction. These are real, separately
+ * priced components, so showing them keeps the drawing honest about what the
+ * BOM is billing for.
+ */
+export function JunctionMarkers({ junctions, scale }: JunctionProps) {
+  const size = Math.max(5, WALL_PX * 1.3);
+  return (
+    <>
+      {junctions.map((junction, i) => (
+        <Rect
+          key={`junction-${i}`}
+          x={junction.at.x * PX_PER_UNIT - size / 2}
+          y={junction.at.y * PX_PER_UNIT - size / 2}
+          width={size}
+          height={size}
+          fill={COLORS.connector}
+          stroke="#ffffff"
+          strokeWidth={Math.max(0.75, 1 / scale)}
+          listening={false}
+        />
+      ))}
+    </>
+  );
+}
+
 interface PreviewProps {
   anchor: GridPoint | null;
   cursor: GridPoint | null;
+  category: PanelCategory;
   scale: number;
 }
 
@@ -95,7 +128,7 @@ interface PreviewProps {
  * drawn panel by panel with its length and panel count. The architect sees the
  * BOM consequence of the wall before committing to it.
  */
-export function WallPreview({ anchor, cursor, scale }: PreviewProps) {
+export function WallPreview({ anchor, cursor, category, scale }: PreviewProps) {
   if (!anchor) return null;
 
   if (!cursor) {
@@ -133,8 +166,8 @@ export function WallPreview({ anchor, cursor, scale }: PreviewProps) {
         fill={COLORS.anchor}
         listening={false}
       />
-      {(sequence ?? []).map((type, i) => {
-        const spec = getPanelSpec(type);
+      {(sequence ?? []).map((size, i) => {
+        const spec = getPanelSpec(size);
         const runPx = spec.widthUnits * PX_PER_UNIT;
         const px = (axis === 'h' ? start.x + cursorUnits : start.x) * PX_PER_UNIT;
         const py = (axis === 'h' ? start.y : start.y + cursorUnits) * PX_PER_UNIT;
@@ -146,7 +179,7 @@ export function WallPreview({ anchor, cursor, scale }: PreviewProps) {
             y={axis === 'h' ? py - WALL_PX / 2 : py}
             width={axis === 'h' ? runPx : WALL_PX}
             height={axis === 'h' ? WALL_PX : runPx}
-            fill={spec.color}
+            fill={categoryColor(category)}
             opacity={0.45}
             stroke="#ffffff"
             strokeWidth={1}
@@ -191,14 +224,15 @@ export function WallPreview({ anchor, cursor, scale }: PreviewProps) {
 
 interface BrushProps {
   edge: { x: number; y: number; axis: 'h' | 'v' } | null;
-  type: Panel['type'];
+  size: PanelSizeId;
+  category: PanelCategory;
   scale: number;
 }
 
 /** Ghost of the single panel the place tool would drop at the cursor. */
-export function BrushPreview({ edge, type, scale }: BrushProps) {
+export function BrushPreview({ edge, size, category, scale }: BrushProps) {
   if (!edge) return null;
-  const spec = getPanelSpec(type);
+  const spec = getPanelSpec(size);
   const runPx = spec.widthUnits * PX_PER_UNIT;
   const px = edge.x * PX_PER_UNIT;
   const py = edge.y * PX_PER_UNIT;
@@ -208,7 +242,7 @@ export function BrushPreview({ edge, type, scale }: BrushProps) {
       y={edge.axis === 'h' ? py - WALL_PX / 2 : py}
       width={edge.axis === 'h' ? runPx : WALL_PX}
       height={edge.axis === 'h' ? WALL_PX : runPx}
-      fill={spec.color}
+      fill={categoryColor(category)}
       opacity={0.4}
       stroke={COLORS.ghost}
       strokeWidth={Math.max(1, 1 / scale)}

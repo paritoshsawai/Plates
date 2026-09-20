@@ -25,14 +25,15 @@ export interface WorkOrder {
     wallHeightFt: number;
     wallLinearFt: number;
   };
-  /** What the factory builds. */
-  materials: Array<{ sku: string; description: string; qty: number }>;
+  /** What the factory builds, category by category. */
+  materials: Array<{ category: string; sku: string; description: string; qty: number }>;
   /** What the customer pays. */
   pricing: {
     currency: string;
     effectiveDate: string;
-    lines: Array<{ sku: string; qty: number; unitPrice: number; lineTotal: number }>;
+    lines: Array<{ category: string; sku: string; qty: number; unitPrice: number; lineTotal: number }>;
     panels: number;
+    connectors: number;
     labor: number;
     transport: number;
     tax: number;
@@ -63,17 +64,24 @@ export function toWorkOrder(plan: Plan, bom: Bom): WorkOrder {
     },
     materials: bom.lines
       .filter((line) => line.qty > 0)
-      .map((line) => ({ sku: line.sku, description: line.description, qty: line.qty })),
+      .map((line) => ({
+        category: line.category,
+        sku: line.sku,
+        description: line.description,
+        qty: line.qty,
+      })),
     pricing: {
       currency: bom.currency,
       effectiveDate: bom.priceEffectiveDate,
       lines: bom.lines.map((line) => ({
+        category: line.category,
         sku: line.sku,
         qty: line.qty,
         unitPrice: line.unitPrice,
         lineTotal: line.lineTotal,
       })),
       panels: bom.cost.panels,
+      connectors: bom.cost.connectors,
       labor: bom.cost.labor,
       transport: bom.cost.transport,
       tax: bom.cost.tax,

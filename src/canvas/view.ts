@@ -25,6 +25,7 @@ export const COLORS = {
   ghost: '#94a3b8',
   label: '#475569',
   anchor: '#0f766e',
+  connector: '#475569',
 } as const;
 
 export interface Viewport {

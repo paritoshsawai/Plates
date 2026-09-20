@@ -1,7 +1,7 @@
-import { getPanelSpec } from '../core/panels';
+import { CATEGORY_STYLE } from '../core/panels';
 import { formatCurrency, isPlaceholderPricing } from '../core/pricing';
 import { formatFt } from '../core/units';
-import type { Bom, ValidationResult } from '../core/types';
+import type { Bom, BomGroup, ValidationResult } from '../core/types';
 import { useStore } from '../state/store';
 import { SectionTitle } from './ui';
 
@@ -55,48 +55,27 @@ export function RightRail({ bom, validation, onEditPricing }: Props) {
 
       <section>
         <SectionTitle>Bill of materials</SectionTitle>
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b border-slate-200 text-slate-500">
-              <th className="py-1 text-left font-medium">Panel</th>
-              <th className="py-1 text-right font-medium">Qty</th>
-              <th className="py-1 text-right font-medium">Unit</th>
-              <th className="py-1 text-right font-medium">Total</th>
-            </tr>
-          </thead>
-          <tbody className="tabular-nums">
-            {bom.lines.map((line) => (
-              <tr key={line.sku} className="border-b border-slate-100">
-                <td className="py-1.5">
-                  <span className="flex items-center gap-1.5">
-                    <span
-                      className="inline-block h-2.5 w-2.5 rounded-sm"
-                      style={{ backgroundColor: getPanelSpec(line.sku).color }}
-                    />
-                    {line.sku}
-                  </span>
-                </td>
-                <td className="py-1.5 text-right font-semibold text-slate-800">{line.qty}</td>
-                <td className="py-1.5 text-right text-slate-500">{formatCurrency(line.unitPrice)}</td>
-                <td className="py-1.5 text-right text-slate-700">{formatCurrency(line.lineTotal)}</td>
-              </tr>
-            ))}
-            <tr>
-              <td className="py-1.5 font-medium text-slate-700">Total</td>
-              <td className="py-1.5 text-right font-semibold text-slate-900">{bom.totalPanels}</td>
-              <td />
-              <td className="py-1.5 text-right font-semibold text-slate-900">
-                {formatCurrency(bom.cost.panels)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div className="space-y-4">
+          {bom.groups.map((group) => (
+            <BomGroupTable key={group.category} group={group} />
+          ))}
+        </div>
+        <div className="mt-3 flex justify-between border-t-2 border-slate-300 pt-1.5 text-xs">
+          <span className="font-semibold text-slate-800">
+            {bom.totalPanels} panels
+            {bom.totalConnectors > 0 && ` \u00b7 ${bom.totalConnectors} connectors`}
+          </span>
+          <span className="font-semibold tabular-nums text-slate-900">
+            {formatCurrency(bom.cost.panels + bom.cost.connectors)}
+          </span>
+        </div>
       </section>
 
       <section>
         <SectionTitle>Estimate</SectionTitle>
         <dl className="space-y-1 text-xs">
           <CostRow label="Panels" value={bom.cost.panels} />
+          {bom.cost.connectors > 0 && <CostRow label="Connectors" value={bom.cost.connectors} />}
           {bom.cost.labor > 0 && <CostRow label="Labor" value={bom.cost.labor} />}
           {bom.cost.transport > 0 && <CostRow label="Transport" value={bom.cost.transport} />}
           {bom.cost.tax > 0 && (
@@ -157,6 +136,55 @@ export function RightRail({ bom, validation, onEditPricing }: Props) {
         </p>
       </section>
     </aside>
+  );
+}
+
+/**
+ * One category's lines with its own subtotal. A wall panel and a roof panel of
+ * identical dimensions are different SKUs, so the quote never merges them into
+ * a single undifferentiated list.
+ */
+function BomGroupTable({ group }: { group: BomGroup }) {
+  const swatch =
+    group.category === 'connector'
+      ? '#64748b'
+      : CATEGORY_STYLE[group.category].color;
+
+  return (
+    <div>
+      <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+        <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: swatch }} />
+        {group.label}
+      </h4>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="border-b border-slate-200 text-slate-500">
+            <th className="py-1 text-left font-medium">SKU</th>
+            <th className="py-1 text-right font-medium">Qty</th>
+            <th className="py-1 text-right font-medium">Unit</th>
+            <th className="py-1 text-right font-medium">Total</th>
+          </tr>
+        </thead>
+        <tbody className="tabular-nums">
+          {group.lines.map((line) => (
+            <tr key={line.sku} className="border-b border-slate-100">
+              <td className="py-1.5 text-slate-700">{line.sku}</td>
+              <td className="py-1.5 text-right font-semibold text-slate-800">{line.qty}</td>
+              <td className="py-1.5 text-right text-slate-500">{formatCurrency(line.unitPrice)}</td>
+              <td className="py-1.5 text-right text-slate-700">{formatCurrency(line.lineTotal)}</td>
+            </tr>
+          ))}
+          <tr>
+            <td className="py-1.5 text-slate-500">Subtotal</td>
+            <td className="py-1.5 text-right font-semibold text-slate-900">{group.qty}</td>
+            <td />
+            <td className="py-1.5 text-right font-semibold text-slate-900">
+              {formatCurrency(group.subtotal)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   );
 }
 

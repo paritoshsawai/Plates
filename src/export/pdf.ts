@@ -6,7 +6,7 @@
  */
 
 import { jsPDF } from 'jspdf';
-import { getPanelSpec } from '../core/panels';
+import { lineLinearFt } from '../core/bom';
 import { plotAreaSqFt } from '../core/plot';
 import { formatCurrencyAscii, isPlaceholderPricing, toPdfSafeText } from '../core/pricing';
 import { WALL_HEIGHT_FT, formatFt } from '../core/units';
@@ -111,20 +111,26 @@ export function buildQuotePdf({ plan, bom, priceConfig, validation, planImage }:
     y,
     pageWidth,
     ['SKU', 'Description', 'Qty', 'Linear ft', 'Unit price', 'Line total'],
-    bom.lines.map((line) => [
-      line.sku,
-      line.description,
-      String(line.qty),
-      String(getPanelSpec(line.sku).widthFt * line.qty),
-      formatCurrencyAscii(line.unitPrice),
-      formatCurrencyAscii(line.lineTotal),
+    bom.groups.flatMap((group) => [
+      ...group.lines.map((line) => [
+        line.sku,
+        line.description,
+        String(line.qty),
+        lineLinearFt(line) === null ? '' : String(lineLinearFt(line)),
+        formatCurrencyAscii(line.unitPrice),
+        formatCurrencyAscii(line.lineTotal),
+      ]),
+      // Each category carries its own subtotal, so a quote reads as wall,
+      // floor and roof rather than one undifferentiated list.
+      ['', `${group.label} subtotal`, String(group.qty), '', '', formatCurrencyAscii(group.subtotal)],
     ]),
-    ['', 'Total panels', String(bom.totalPanels), formatFt(bom.utilization.linearFt), '', formatCurrencyAscii(bom.cost.panels)],
+    ['', 'Total', String(bom.totalPanels + bom.totalConnectors), formatFt(bom.utilization.linearFt), '', formatCurrencyAscii(bom.cost.panels + bom.cost.connectors)],
   );
   y += 6;
 
   y = section(doc, y, 'Estimate');
   const costRows: Array<[string, string]> = [['Panels', formatCurrencyAscii(bom.cost.panels)]];
+  if (bom.cost.connectors) costRows.push(['Connectors', formatCurrencyAscii(bom.cost.connectors)]);
   if (bom.cost.labor) costRows.push(['Labor', formatCurrencyAscii(bom.cost.labor)]);
   if (bom.cost.transport) costRows.push(['Transport', formatCurrencyAscii(bom.cost.transport)]);
   if (bom.cost.tax) costRows.push([`Tax (${priceConfig.taxPercent}%)`, formatCurrencyAscii(bom.cost.tax)]);

@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { PANEL_CATALOG } from '../core/panels';
+import { CATEGORY_STYLE, CONNECTOR_STYLE, PANEL_CATALOG } from '../core/panels';
+import { priceOf, setPrice } from '../core/pricing';
 import { useStore } from '../state/store';
-import type { PriceConfig } from '../core/types';
+import type { ConnectorType, PanelCategory, PriceCategory, PriceConfig } from '../core/types';
 import { Button, Field, Modal, NumberInput } from './ui';
 
 interface Props {
@@ -19,6 +20,9 @@ export function PricingDialog({ onClose }: Props) {
   const [draft, setDraft] = useState<PriceConfig>(priceConfig);
 
   const patch = (fields: Partial<PriceConfig>) => setDraft((d) => ({ ...d, ...fields }));
+
+  const setRowPrice = (category: PriceCategory, size: string, unitPrice: number) =>
+    setDraft((d) => ({ ...d, rows: setPrice(d, category, size, unitPrice) }));
 
   return (
     <Modal
@@ -39,24 +43,56 @@ export function PricingDialog({ onClose }: Props) {
         </>
       }
     >
+      <p className="text-xs leading-relaxed text-slate-600">
+        Every category is priced separately even where the footprint matches. A roof panel and a
+        wall panel are both 4 ft &times; 10 ft but are different assemblies, so each row is edited
+        on its own.
+      </p>
+
+      {(Object.keys(CATEGORY_STYLE) as PanelCategory[]).map((category) => (
+        <section key={category}>
+          <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <span
+              className="inline-block h-2.5 w-2.5 rounded-sm"
+              style={{ backgroundColor: CATEGORY_STYLE[category].color }}
+            />
+            {CATEGORY_STYLE[category].plural} (ex works, INR)
+          </h3>
+          <div className="grid grid-cols-2 gap-3">
+            {PANEL_CATALOG.map((spec) => (
+              <Field key={spec.id} label={spec.label}>
+                <NumberInput
+                  value={priceOf(draft, category, spec.id)}
+                  step={1}
+                  onChange={(value) => setRowPrice(category, spec.id, value)}
+                  suffix="each"
+                />
+              </Field>
+            ))}
+          </div>
+        </section>
+      ))}
+
       <section>
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Panel prices (ex works, INR)
+          Junction connectors (ex works, INR)
         </h3>
         <div className="grid grid-cols-2 gap-3">
-          {PANEL_CATALOG.map((spec) => (
-            <Field key={spec.id} label={spec.label}>
+          {(Object.keys(CONNECTOR_STYLE) as ConnectorType[]).map((type) => (
+            <Field key={type} label={CONNECTOR_STYLE[type].label}>
               <NumberInput
-                value={draft.panelUnitPrice[spec.id]}
+                value={priceOf(draft, 'connector', type)}
                 step={1}
-                onChange={(value) =>
-                  patch({ panelUnitPrice: { ...draft.panelUnitPrice, [spec.id]: value } })
-                }
+                onChange={(value) => setRowPrice('connector', type, value)}
                 suffix="each"
               />
             </Field>
           ))}
         </div>
+        <p className="mt-2 text-xs text-slate-500">
+          Connectors are counted from the layout, never placed by hand. Seeded at one flat price;
+          differentiate per junction type here whenever Arplace needs to.
+        </p>
       </section>
 
       <section>

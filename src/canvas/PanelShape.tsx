@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { Group, Rect } from 'react-konva';
 import type Konva from 'konva';
-import { getPanelSpec } from '../core/panels';
+import { categoryColor, getPanelSpec } from '../core/panels';
 import type { Panel } from '../core/types';
 import { COLORS, PX_PER_UNIT, WALL_PX } from './view';
 
@@ -18,7 +18,7 @@ interface Props {
 const HIT_PAD = 7;
 
 export function PanelShape({ panel, selected, flagged, draggable, onSelect, onMoved }: Props) {
-  const spec = getPanelSpec(panel.type);
+  const spec = getPanelSpec(panel.size);
   const runPx = spec.widthUnits * PX_PER_UNIT;
 
   const width = panel.orientation === 'h' ? runPx : WALL_PX;
@@ -44,7 +44,7 @@ export function PanelShape({ panel, selected, flagged, draggable, onSelect, onMo
     [],
   );
 
-  const fill = flagged ? COLORS.error : spec.color;
+  const fill = flagged ? COLORS.error : categoryColor(panel.category);
 
   return (
     <Group

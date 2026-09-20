@@ -3,7 +3,15 @@ import { createPlan, deserializePlan } from '../core/plan';
 import { flipOrientation, getPanelSpec, newPanelId } from '../core/panels';
 import { normalizePlot } from '../core/plot';
 import { tileRun } from '../core/tiling';
-import type { Orientation, Panel, PanelTypeId, Plan, Plot, PriceConfig } from '../core/types';
+import type {
+  Orientation,
+  Panel,
+  PanelCategory,
+  PanelSizeId,
+  Plan,
+  Plot,
+  PriceConfig,
+} from '../core/types';
 import { loadPriceConfig, localPlanRepository, savePriceConfig } from './storage';
 import type { PlanSummary } from './storage';
 
@@ -32,8 +40,10 @@ export interface AppState {
 
   tool: Tool;
   /** Which panel the 'panel' tool places. */
-  brush: PanelTypeId;
+  brush: PanelSizeId;
   brushOrientation: Orientation;
+  /** The category new panels are created in, and the layer editing targets. */
+  activeCategory: PanelCategory;
   selection: string[];
   /** First node clicked with the wall tool, if a run is in progress. */
   wallAnchor: { x: number; y: number } | null;
@@ -46,7 +56,8 @@ export interface AppState {
 
   setRole(role: Role): void;
   setTool(tool: Tool): void;
-  setBrush(type: PanelTypeId): void;
+  setBrush(size: PanelSizeId): void;
+  setActiveCategory(category: PanelCategory): void;
   rotateBrush(): void;
   setWallAnchor(node: { x: number; y: number } | null): void;
   notify(text: string, tone?: 'info' | 'error'): void;
@@ -115,6 +126,7 @@ export const useStore = create<AppState>()((set, get) => {
     tool: 'wall',
     brush: '4x10',
     brushOrientation: 'h',
+    activeCategory: 'wall',
     selection: [],
     wallAnchor: null,
     message: null,
@@ -129,6 +141,7 @@ export const useStore = create<AppState>()((set, get) => {
 
     setTool: (tool) => set({ tool, wallAnchor: null, selection: tool === 'select' ? get().selection : [] }),
     setBrush: (brush) => set({ brush }),
+    setActiveCategory: (activeCategory) => set({ activeCategory, selection: [], wallAnchor: null }),
     rotateBrush: () => set({ brushOrientation: flipOrientation(get().brushOrientation) }),
     setWallAnchor: (wallAnchor) => set({ wallAnchor }),
     notify: (text, tone = 'info') => set({ message: { text, tone } }),
@@ -153,8 +166,15 @@ export const useStore = create<AppState>()((set, get) => {
     },
 
     placeBrush: (x, y, orientation) => {
-      const { brush } = get();
-      const panel: Panel = { id: newPanelId(), type: brush, x, y, orientation };
+      const { brush, activeCategory } = get();
+      const panel: Panel = {
+        id: newPanelId(),
+        category: activeCategory,
+        size: brush,
+        x,
+        y,
+        orientation,
+      };
       commit((doc) => ({ ...doc, panels: [...doc.panels, panel] }));
     },
 
@@ -170,7 +190,7 @@ export const useStore = create<AppState>()((set, get) => {
 
       const orientation: Orientation = dx !== 0 ? 'h' : 'v';
       const start = { x: Math.min(from.x, to.x), y: Math.min(from.y, to.y) };
-      const panels = tileRun(start.x, start.y, lengthUnits, orientation);
+      const panels = tileRun(start.x, start.y, lengthUnits, orientation, get().activeCategory);
       if (!panels) {
         get().notify('That run cannot be built from 4 ft and 2 ft panels.', 'error');
         return;
@@ -209,7 +229,7 @@ export const useStore = create<AppState>()((set, get) => {
         if (!selected.has(panel.id)) continue;
         // Offset by the panel's own run so the copy lands beside the original
         // rather than on top of it, which would read as an overlap error.
-        const len = getPanelSpec(panel.type).widthUnits;
+        const len = getPanelSpec(panel.size).widthUnits;
         copies.push({
           ...panel,
           id: newPanelId(),
@@ -314,10 +334,13 @@ export const useStore = create<AppState>()((set, get) => {
     refreshSavedPlans: () => set({ savedPlans: localPlanRepository.list() }),
 
     updatePriceConfig: (patch) => {
+      const current = get().priceConfig;
       const next: PriceConfig = {
-        ...get().priceConfig,
+        ...current,
         ...patch,
-        panelUnitPrice: { ...get().priceConfig.panelUnitPrice, ...(patch.panelUnitPrice ?? {}) },
+        // Rows replace wholesale when supplied; the dialog always hands over a
+        // complete set, so merging row by row would only let a stale row linger.
+        rows: patch.rows ?? current.rows,
       };
       savePriceConfig(next);
       set({ priceConfig: next });

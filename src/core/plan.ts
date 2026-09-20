@@ -5,11 +5,15 @@
  * Postgres `jsonb` column tomorrow without a format change.
  */
 
-import { isKnownPanelType } from './panels';
+import { isKnownCategory, isKnownPanelSize } from './panels';
 import { rectPlotFromFt } from './plot';
-import type { Orientation, Panel, Plan, Plot } from './types';
+import type { Orientation, Panel, PanelCategory, Plan, Plot } from './types';
 
-export const PLAN_SCHEMA_VERSION = 1;
+/**
+ * 1: wall panels only, size stored as `type`.
+ * 2: panels carry a category, size stored as `size`.
+ */
+export const PLAN_SCHEMA_VERSION = 2;
 
 function newId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
@@ -95,16 +99,28 @@ export function parsePlan(raw: unknown): Plan {
   const seenIds = new Set<string>();
   const panels: Panel[] = panelsRaw.map((p, i) => {
     const panel = p as Record<string, unknown>;
-    const type = String(panel.type);
-    if (!isKnownPanelType(type)) {
-      throw new PlanParseError(`panels[${i}] has unsupported type "${type}".`);
+
+    // Schema 1 stored the size as `type` and had no category: every panel back
+    // then was a wall. Reading both spellings keeps old plans and exports from
+    // other tools loading.
+    const size = String(panel.size ?? panel.type);
+    if (!isKnownPanelSize(size)) {
+      throw new PlanParseError(`panels[${i}] has unsupported size "${size}".`);
     }
+
+    const rawCategory = panel.category === undefined ? 'wall' : String(panel.category);
+    if (!isKnownCategory(rawCategory)) {
+      throw new PlanParseError(`panels[${i}] has unsupported category "${rawCategory}".`);
+    }
+    const category: PanelCategory = rawCategory;
+
     const id = typeof panel.id === 'string' && panel.id ? panel.id : newId('p');
     if (seenIds.has(id)) throw new PlanParseError(`Duplicate panel id "${id}".`);
     seenIds.add(id);
     return {
       id,
-      type,
+      category,
+      size,
       x: asInt(panel.x, `panels[${i}].x`),
       y: asInt(panel.y, `panels[${i}].y`),
       orientation: asOrientation(panel.orientation ?? panel.rotation),
