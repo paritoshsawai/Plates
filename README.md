@@ -11,7 +11,7 @@ length is a multiple of 2 ft tiles exactly with zero offcut, and nothing else ca
 ```bash
 npm install
 npm run dev       # http://localhost:5173
-npm test          # 148 unit tests over the geometry, tiling, BOM, pricing and store
+npm test          # 199 unit tests over the geometry, tiling, BOM, pricing, store and 3D
 npm run build     # typecheck + production bundle
 ```
 
@@ -124,9 +124,8 @@ exports round-trip back through Import.
 
 ## What is not built
 
-These are the spec's Phase-2 items, deliberately deferred:
-
-- Multi-storey stacking
+- Multi-storey stacking, and **roof pitch** — the roof is a flat footprint until Arplace's
+  structural team defines pitch rules
 - DXF/CAD export and a dedicated factory view (Konva cannot emit DXF; this needs Maker.js or
   dxf-writer)
 - A server, real authentication, and the ERP/webhook integration — `toWorkOrder()` produces the

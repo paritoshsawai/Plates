@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type Konva from 'konva';
 import { DesignCanvas } from './canvas/DesignCanvas';
 import { LeftRail } from './components/LeftRail';
@@ -25,10 +25,16 @@ import {
 import { useStore } from './state/store';
 
 type Dialog = 'plot' | 'pricing' | 'plans' | 'underlay' | null;
+type View = 'plan' | '3d';
+
+// Three is a large dependency and only the 3D tab needs it, so it loads on
+// demand rather than on first paint - the same split the quote PDF uses.
+const ThreeView = lazy(() => import('./three/ThreeView'));
 
 export default function App() {
   const stageRef = useRef<Konva.Stage | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [view, setView] = useState<View>('plan');
 
   const plan = useStore((s) => s.plan);
   const priceConfig = useStore((s) => s.priceConfig);
@@ -253,9 +259,42 @@ export default function App() {
             onEditUnderlay={() => setDialog('underlay')}
           />
         )}
-        <main className="relative order-first min-h-[55vh] min-w-0 flex-1 lg:order-none lg:min-h-0">
-          <DesignCanvas validation={validation} stageRef={stageRef} />
-          <CalibrationBanner />
+        <main className="relative order-first flex min-h-[55vh] min-w-0 flex-1 flex-col lg:order-none lg:min-h-0">
+          <div className="flex shrink-0 gap-1 border-b border-slate-200 bg-white px-2 py-1.5">
+            {(['plan', '3d'] as const).map((id) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setView(id)}
+                className={`rounded px-2.5 py-1 text-xs font-medium transition ${
+                  view === id ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {id === 'plan' ? 'Plan' : '3D'}
+              </button>
+            ))}
+          </div>
+
+          {/* The plan canvas stays mounted: unmounting Konva would lose the
+              viewport, and the PDF export captures its stage. */}
+          <div className={`relative min-h-0 flex-1 ${view === 'plan' ? '' : 'hidden'}`}>
+            <DesignCanvas validation={validation} stageRef={stageRef} />
+            <CalibrationBanner />
+          </div>
+
+          {view === '3d' && (
+            <div className="min-h-0 flex-1">
+              <Suspense
+                fallback={
+                  <p className="flex h-full items-center justify-center text-sm text-slate-500">
+                    Loading the 3D view&hellip;
+                  </p>
+                }
+              >
+                <ThreeView />
+              </Suspense>
+            </div>
+          )}
         </main>
         <RightRail
           bom={bom}

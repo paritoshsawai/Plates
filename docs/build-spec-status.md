@@ -39,9 +39,9 @@ satisfies the item.
 | 1 | Panel categories, category×size pricing, grouped BOM | **Done** |
 | 3 | Corner / T / cross connector auto-detection | **Done** |
 | 2 | Doors and windows | **Done** |
-| 1 | Floor and roof panels (10 ft strip tiling) | Not built |
-| 4 | Image / PDF trace-over | Not built |
-| 5 | 3D view | Not built |
+| 1 | Floor and roof panels (10 ft strip tiling) | **Done** |
+| 4 | Image trace-over with scale calibration | **Done** (raster; PDF not read) |
+| 5 | 3D view | **Done** |
 
 ### Extension deviations
 
@@ -55,15 +55,22 @@ satisfies the item.
   its size, position and orientation — which is how the factory pre-cuts them, and which removes
   the size-mismatch case entirely. A "split into 2 ft panels" action exists so a 2 ft opening can
   be placed in a run that was auto-tiled with 4 ft panels.
-- **§5 will not use CSG.** Openings occupy whole discrete panel slots, so a door is simply not a
-  wall mesh at that slot. That drops a WASM dependency and buys nothing.
+- **§5 uses no CSG and no extrusion.** Openings occupy whole discrete panel slots, so a door is
+  built as a header rather than cut out of a solid wall, and every panel is an axis-aligned box.
+  That drops a WASM dependency and a lot of machinery for no loss.
+- **§5 uses plain Three.js, not react-three-fiber.** r3f currently pins React below the version
+  this app runs on and pulls an Expo peer tree behind it. The 3D view is a read-only viewer -- a
+  scene rebuilt from the panel list, an orbit camera and raycast picking -- so the dependency was
+  not worth downgrading React for.
+- **§1 floor/roof footprint comes from a flood fill**, not a polygon: the walls are a graph, not a
+  closed ring, and a fill from outside handles any shape and ignores interior partitions for free.
 
 ## Still not built
 
 Multi-storey stacking · DXF export and factory view · branded client-shareable quote links ·
-ERP/webhook integration · whole-plan optimisation pass · ML floor-plan recognition · GeoJSON/KML
-import · structural and load validation · wall thickness and interior/exterior typing ·
-collaboration and comments · roof pitch.
+ERP/webhook integration · whole-plan optimisation pass · ML floor-plan recognition · PDF import
+(export the page to PNG first) · GeoJSON/KML import · structural and load validation · wall
+thickness and interior/exterior typing · collaboration and comments · **roof pitch**.
 
 `toWorkOrder()` already emits the ERP payload, so that integration is a transport problem, not a
 modelling one.
@@ -84,7 +91,7 @@ modelling one.
 
 ## Test coverage
 
-148 unit tests across `core/`, `state/` and `canvas/view.ts`, plus a Playwright drive of the built app that
+199 unit tests across `core/`, `state/`, `three/` and `canvas/view.ts`, plus a Playwright drive of the built app that
 exercises drawing, selection, deletion, undo, the placement guards, pricing, all five exports, save
 and reopen, and the read-only client view. Drawing a 20 × 16 ft room in the browser produces the
 same 18 panels / 72 linear ft the unit tests assert.
