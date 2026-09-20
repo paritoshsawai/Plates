@@ -73,8 +73,8 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
           <ToolButton
             active={tool === 'select'}
             onClick={() => setTool('select')}
-            label="Select & pan"
-            hint="Drag panels to move, drag the background to pan."
+            label="Select & move"
+            hint="Drag a panel to move it, or drag the background to box-select. Hold Space to pan."
           />
         </div>
       </section>
@@ -254,8 +254,8 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
           </div>
           <p className="mt-2 text-xs text-slate-500">
             {selectionCount === 0
-              ? 'Nothing selected.'
-              : `${selectionCount} panel${selectionCount === 1 ? '' : 's'} selected.`}
+              ? 'Nothing selected. Drag a box on the plan, or shift-click, to pick several.'
+              : `${selectionCount} panel${selectionCount === 1 ? '' : 's'} selected. Arrow keys nudge the whole selection 2 ft.`}
           </p>
         </section>
       )}

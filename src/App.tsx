@@ -112,6 +112,21 @@ export default function App() {
         else state.rotateBrush();
         return;
       }
+      const nudge: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      if (nudge[e.key]) {
+        if (state.selection.length === 0) return;
+        // Claim the key only when something is selected, so arrow keys still
+        // scroll the rails when nothing is picked.
+        e.preventDefault();
+        const [dx, dy] = nudge[e.key];
+        state.nudgeSelection(dx, dy);
+        return;
+      }
       if (e.key === '1') state.setTool('wall');
       if (e.key === '2') state.setTool('panel');
       if (e.key === '3') state.setTool('select');

@@ -208,6 +208,36 @@ export function buildScene(panels: Panel[]): SceneBuild {
   return { group, pickMap, bounds };
 }
 
+/**
+ * How far a camera must sit from a bounding sphere of `sphereRadius` to hold
+ * the whole thing in frame.
+ *
+ * Distance has to satisfy the *tighter* of the two fields of view. A wide,
+ * short pane is limited by its vertical FOV; a tall, narrow one by the
+ * horizontal FOV the aspect ratio implies. Solving only the vertical one - or
+ * worse, using the bounding box diagonal as a distance, as this did before -
+ * clips a wide building the moment the pane is not square.
+ */
+export function fitRadius(
+  sphereRadius: number,
+  fovDegrees: number,
+  aspect: number,
+  margin = 1.25,
+): number {
+  const safeRadius = Math.max(sphereRadius, 0.5);
+  const vertical = (fovDegrees * Math.PI) / 180;
+  const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * Math.max(aspect, 0.01));
+  const forVertical = safeRadius / Math.sin(vertical / 2);
+  const forHorizontal = safeRadius / Math.sin(horizontal / 2);
+  return Math.max(forVertical, forHorizontal) * margin;
+}
+
+/** Bounding sphere of a build, for framing. */
+export function boundingSphere(bounds: THREE.Box3): { centre: THREE.Vector3; radius: number } {
+  const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+  return { centre: sphere.center.clone(), radius: sphere.radius };
+}
+
 /** Free every geometry and material a build allocated. */
 export function disposeScene(group: THREE.Group): void {
   group.traverse((object) => {

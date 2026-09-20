@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { buildScene, disposeScene } from './scene';
+import { boundingSphere, buildScene, disposeScene, fitRadius } from './scene';
 import { useStore } from '../state/store';
 import type { Panel } from '../core/types';
 
@@ -40,6 +40,10 @@ export default function ThreeView() {
   const sceneRef = useRef<THREE.Scene | null>(null);
   const modelRef = useRef<THREE.Group | null>(null);
   const pickRef = useRef<Map<THREE.Object3D, string>>(new Map());
+  // Set once the user moves the camera, so an automatic re-fit never yanks the
+  // view out from under them.
+  const touchedRef = useRef(false);
+  const fitRef = useRef<(() => void) | null>(null);
   const orbitRef = useRef<Orbit>({
     radius: 80,
     theta: Math.PI * 0.75,
@@ -85,7 +89,12 @@ export default function ThreeView() {
       camera.aspect = clientWidth / clientHeight;
       camera.updateProjectionMatrix();
     };
-    const observer = new ResizeObserver(resize);
+    const observer = new ResizeObserver(() => {
+      resize();
+      // A radius that framed a wide pane clips a narrow one, so re-fit unless
+      // the user has taken the camera somewhere themselves.
+      if (!touchedRef.current) fitRef.current?.();
+    });
     observer.observe(container);
     resize();
 
@@ -100,7 +109,9 @@ export default function ThreeView() {
     const CLICK_SLOP_PX = 5;
 
     const onPointerDown = (e: PointerEvent) => {
-      dragging = e.shiftKey || e.button === 1 ? 'pan' : 'orbit';
+      // Right and middle button pan, as in every CAD tool; shift-drag does too,
+      // for trackpads with no second button.
+      dragging = e.button === 2 || e.button === 1 || e.shiftKey ? 'pan' : 'orbit';
       lastX = e.clientX;
       lastY = e.clientY;
       travelled = 0;
@@ -113,15 +124,22 @@ export default function ThreeView() {
       lastX = e.clientX;
       lastY = e.clientY;
       travelled += Math.abs(dx) + Math.abs(dy);
+      if (travelled > CLICK_SLOP_PX) touchedRef.current = true;
       const orbit = orbitRef.current;
       if (dragging === 'orbit') {
         orbit.theta -= dx * 0.008;
         // Stop just short of the poles, where the view flips over.
         orbit.phi = Math.min(Math.PI / 2.05, Math.max(0.12, orbit.phi - dy * 0.006));
       } else {
+        // Pan across the screen, not the world: horizontal drag slides along
+        // the camera's right vector, vertical drag lifts the target as well as
+        // sliding it, so a tall building can be raised into frame.
         const scale = orbit.radius * 0.0016;
-        orbit.target.x -= (dx * Math.cos(orbit.theta) - dy * Math.sin(orbit.theta)) * scale;
-        orbit.target.z += (dx * Math.sin(orbit.theta) + dy * Math.cos(orbit.theta)) * scale;
+        const cos = Math.cos(orbit.theta);
+        const sin = Math.sin(orbit.theta);
+        orbit.target.x -= dx * cos * scale - dy * Math.cos(orbit.phi) * sin * scale;
+        orbit.target.z += dx * sin * scale + dy * Math.cos(orbit.phi) * cos * scale;
+        orbit.target.y += dy * Math.sin(orbit.phi) * scale;
       }
     };
     const onPointerUp = (e: PointerEvent) => {
@@ -130,6 +148,7 @@ export default function ThreeView() {
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      touchedRef.current = true;
       const orbit = orbitRef.current;
       orbit.radius = Math.min(600, Math.max(6, orbit.radius * (e.deltaY > 0 ? 1.1 : 1 / 1.1)));
     };
@@ -150,7 +169,26 @@ export default function ThreeView() {
       select(id ? [id] : []);
     };
 
+    // Without this the right button opens the browser menu mid-pan.
+    const onContextMenu = (e: Event) => e.preventDefault();
+
+    /**
+     * Frame the whole model. Re-derived from the live aspect ratio, so a fit
+     * that suited a wide pane is recomputed when the pane turns narrow.
+     */
+    const fit = () => {
+      const model = modelRef.current;
+      if (!model) return;
+      const box = new THREE.Box3().setFromObject(model);
+      if (box.isEmpty()) return;
+      const sphere = boundingSphere(box);
+      orbitRef.current.target.copy(sphere.centre);
+      orbitRef.current.radius = fitRadius(sphere.radius, camera.fov, camera.aspect);
+    };
+    fitRef.current = fit;
+
     const element = renderer.domElement;
+    element.addEventListener('contextmenu', onContextMenu);
     element.addEventListener('pointerdown', onPointerDown);
     element.addEventListener('pointermove', onPointerMove);
     element.addEventListener('pointerup', onPointerUp);
@@ -173,6 +211,8 @@ export default function ThreeView() {
       element.removeEventListener('pointerup', onPointerUp);
       element.removeEventListener('wheel', onWheel);
       element.removeEventListener('click', onClick);
+      element.removeEventListener('contextmenu', onContextMenu);
+      fitRef.current = null;
       if (modelRef.current) disposeScene(modelRef.current);
       renderer.dispose();
       element.remove();
@@ -195,13 +235,8 @@ export default function ThreeView() {
     modelRef.current = built.group;
     pickRef.current = built.pickMap;
 
-    // Frame the building the first time it has any extent.
-    const size = built.bounds.getSize(new THREE.Vector3());
-    const centre = built.bounds.getCenter(new THREE.Vector3());
-    if (size.length() > 1) {
-      orbitRef.current.target.copy(centre);
-      orbitRef.current.radius = Math.max(20, size.length() * 1.1);
-    }
+    // Frame it, unless the user has already moved the camera themselves.
+    if (!touchedRef.current) fitRef.current?.();
   }, [panels]);
 
   // Highlight the selected panels by brightening their material.
@@ -216,12 +251,45 @@ export default function ThreeView() {
     }
   }, [selection, panels]);
 
+  /** Point the camera from a fixed direction, then re-fit. */
+  const setView = (theta: number, phi: number) => {
+    orbitRef.current.theta = theta;
+    orbitRef.current.phi = phi;
+    touchedRef.current = false;
+    fitRef.current?.();
+  };
+
   return (
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
+
+      <div className="absolute right-3 top-3 flex gap-1.5">
+        {([
+          ['Fit', null],
+          ['Top', [Math.PI, 0.13]],
+          ['Front', [Math.PI, Math.PI / 2.05]],
+          ['Iso', [Math.PI * 0.75, Math.PI * 0.35]],
+        ] as const).map(([label, angles]) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => {
+              if (angles) setView(angles[0], angles[1]);
+              else {
+                touchedRef.current = false;
+                fitRef.current?.();
+              }
+            }}
+            className="rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <p className="pointer-events-none absolute inset-x-0 bottom-0 p-3 text-center text-xs text-slate-500">
-        Drag to orbit &middot; shift-drag to pan &middot; scroll to zoom &middot; click a panel to
-        select it
+        Drag to orbit &middot; right-drag or shift-drag to pan &middot; scroll to zoom &middot;
+        click a panel to select it
       </p>
       {panels.length === 0 && (
         <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-500">

@@ -198,13 +198,29 @@ describe('area categories', () => {
     expect(result.errors.filter((e) => e.code === 'open-end')).toEqual([]);
   });
 
-  it('warns when a floor does not reach the whole building', () => {
+  it('blocks the plan when a floor does not reach the whole building', () => {
     const panels = [...room20x20(), ...strip('floor', 0)];
     const result = validatePlan(panels, bigPlot);
-    const warning = result.warnings.find((w) => w.code === 'area-incomplete');
-    expect(warning).toBeDefined();
+    const issue = result.errors.find((e) => e.code === 'area-incomplete');
+    expect(issue).toBeDefined();
     // Half the 400 sq ft room is still bare.
-    expect(warning!.message).toContain('200 sq ft');
+    expect(issue!.message).toContain('200 sq ft');
+    expect(result.manufacturable).toBe(false);
+  });
+
+  it('carries the uncovered cells so the plan can shade them', () => {
+    const panels = [...room20x20(), ...strip('floor', 0)];
+    const issue = validatePlan(panels, bigPlot).errors.find((e) => e.code === 'area-incomplete');
+    // 200 sq ft of bare floor is 50 cells of 2 x 2 ft, all in the lower half.
+    expect(issue!.cells).toHaveLength(50);
+    expect(issue!.cells!.every((cell) => cell.y >= 5)).toBe(true);
+  });
+
+  it('says nothing about a category with no panels at all', () => {
+    // A wall-only plan is a legitimate work in progress, not a broken one.
+    const result = validatePlan(room20x20(), bigPlot);
+    expect(result.issues.some((i) => i.code === 'area-incomplete')).toBe(false);
+    expect(result.manufacturable).toBe(true);
   });
 
   it('rejects a floor panel that leaves the plot', () => {

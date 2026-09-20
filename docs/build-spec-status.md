@@ -64,6 +64,12 @@ satisfies the item.
   not worth downgrading React for.
 - **§1 floor/roof footprint comes from a flood fill**, not a polygon: the walls are a graph, not a
   closed ring, and a fill from outside handles any shape and ignores interior partitions for free.
+- **An incomplete floor or roof is a blocking error, not a warning.** Once a category has a single
+  panel it must reach the whole building, and the uncovered cells are shaded on the plan. The
+  honest consequence, stated plainly: a building no axis of which divides by 10 ft — a 16 × 16 ft
+  one, say — can never be fully floored, so once a floor exists it cannot read manufacturable until
+  it is resized. That is what "panels are never cut" costs. A plan with **no** floor at all is
+  untouched: a wall-only plan is a legitimate work in progress.
 
 ## Still not built
 
@@ -88,10 +94,15 @@ modelling one.
 | Shared party walls | One set of panels covers a shared wall; a second set on the same edges is an overlap error (tested) |
 | Pricing correctness | Never hard-coded; dated schedule, effective date on every quote |
 | Units | Feet at the edges, integer 2 ft units internally — no floating-point drift |
+| Floor or roof that cannot reach the whole building | Blocking error with the bare area in sq ft, the uncovered cells shaded on the plan, and the nearest buildable depth |
 
 ## Test coverage
 
-199 unit tests across `core/`, `state/`, `three/` and `canvas/view.ts`, plus a Playwright drive of the built app that
+228 unit tests across `core/`, `state/`, `three/` and `canvas/view.ts`, plus a Playwright drive of the built app that
 exercises drawing, selection, deletion, undo, the placement guards, pricing, all five exports, save
 and reopen, and the read-only client view. Drawing a 20 × 16 ft room in the browser produces the
 same 18 panels / 72 linear ft the unit tests assert.
+
+The browser drive is not a formality — it is what caught the corner-click, `nearestEdge` and
+PDF-encoding bugs, and in this round two more that no unit test would have: a marquee left open
+when the mouse is released off-canvas, and a space-drag pan silently clearing the selection.

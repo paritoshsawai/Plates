@@ -239,6 +239,8 @@ export interface ValidationIssue {
   panelIds: string[];
   /** Node to flag, for open ends. */
   at?: GridPoint;
+  /** Cells to shade, for an area that is not fully covered. */
+  cells?: GridCell[];
 }
 
 export interface ValidationResult {

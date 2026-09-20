@@ -3,6 +3,7 @@ import { createPlan, deserializePlan } from '../core/plan';
 import { flipOrientation, getPanelSpec, newPanelId } from '../core/panels';
 import { isOpeningCategory } from '../core/types';
 import { normalizePlot } from '../core/plot';
+import { canPlace } from '../core/validation';
 import { tileRun } from '../core/tiling';
 import { bestTileFootprint } from '../core/areaTiling';
 import { interiorCells } from '../core/footprint';
@@ -98,6 +99,7 @@ export interface AppState {
   autoFillRun(from: { x: number; y: number }, to: { x: number; y: number }): void;
   movePanel(id: string, x: number, y: number): void;
   rotateSelection(): void;
+  nudgeSelection(dx: number, dy: number): void;
   duplicateSelection(): void;
   deleteSelection(): void;
 
@@ -369,6 +371,41 @@ export const useStore = create<AppState>()((set, get) => {
           selected.has(p.id) ? { ...p, orientation: flipOrientation(p.orientation) } : p,
         ),
       }));
+    },
+
+    /**
+     * Move the whole selection one 2 ft step.
+     *
+     * All or nothing: if any panel in the selection cannot legally land on the
+     * step, the move is refused entirely. A partial nudge would silently break
+     * the run the selection was drawn from, which is worse than not moving.
+     * The selection is tested against the panels that are *not* moving, so a
+     * run sliding along itself is not read as colliding with its own tail.
+     */
+    nudgeSelection: (dx, dy) => {
+      const selected = new Set(get().selection);
+      if (selected.size === 0 || (dx === 0 && dy === 0)) return;
+
+      const { panels, plot } = get().plan;
+      const stationary = panels.filter((p) => !selected.has(p.id));
+      const moved = panels
+        .filter((p) => selected.has(p.id))
+        .map((p) => ({ ...p, x: p.x + dx, y: p.y + dy }));
+
+      for (const panel of moved) {
+        if (!canPlace([...stationary, ...moved], plot, panel)) {
+          set({
+            message: {
+              text: 'That move would push a panel outside the plot or onto another one.',
+              tone: 'error',
+            },
+          });
+          return;
+        }
+      }
+
+      const byId = new Map(moved.map((p) => [p.id, p]));
+      commit((doc) => ({ ...doc, panels: doc.panels.map((p) => byId.get(p.id) ?? p) }));
     },
 
     duplicateSelection: () => {

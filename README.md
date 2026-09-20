@@ -11,7 +11,7 @@ length is a multiple of 2 ft tiles exactly with zero offcut, and nothing else ca
 ```bash
 npm install
 npm run dev       # http://localhost:5173
-npm test          # 199 unit tests over the geometry, tiling, BOM, pricing, store and 3D
+npm test          # 228 unit tests over the geometry, tiling, BOM, pricing, store and 3D
 npm run build     # typecheck + production bundle
 ```
 
@@ -22,7 +22,10 @@ npm run build     # typecheck + production bundle
    what snapping set aside.
 2. **Draw walls.** Click two points; the run is auto-filled with the fewest possible panels. The
    preview shows the tiling and the panel count *before* you commit.
-3. **Place single panels** where you want a specific one, or select, drag, rotate and duplicate.
+3. **Place single panels** where you want a specific one. Drag a box on the plan to select several
+   at once (shift adds to the selection), then rotate, duplicate, delete, or nudge the whole lot
+   2 ft at a time with the arrow keys. Panning is hold-Space or middle-drag, since a plain drag now
+   draws the selection box.
 4. **Watch it validate.** Overlaps, gaps, out-of-bounds panels and off-grid coordinates are flagged
    live. The plan reads *Manufacturable ✓* only when every error is gone.
 5. **Read the BOM and cost.** Panel counts, line items, totals and material utilisation update on
@@ -51,9 +54,23 @@ From that, every check is integer bookkeeping:
 | Out of bounds | An edge's endpoints or midpoint fall outside the plot polygon |
 | Off grid | A coordinate is not an integer (only reachable via import) |
 | Detached structures | More than one connected component — a warning, not an error |
+| Bare floor or roof | A floor or roof exists but does not reach every interior cell |
 
 Node degree does all the gap work: 1 is an open end, 2 is a straight run or a corner, 3 a
 T-junction, 4 a crossing.
+
+### Floor and roof
+
+Floor and roof panels lie *flat*, so both catalog sizes are 10 ft deep on plan and the two
+categories occupy grid **cells** rather than edges. They are laid in 10 ft strips, with the 1D
+tiling above picking the 4 ft and 2 ft widths along each strip. The building interior comes from a
+flood fill starting *outside* the wall bounding box — the walls are a graph, not a closed ring, so
+a fill handles any shape and ignores interior partitions for free.
+
+The consequence is worth stating plainly: **a building no axis of which divides by 10 ft cannot be
+fully floored.** Once a floor or roof exists, anything it cannot reach is a blocking error with the
+bare area shaded on the plan, not a quiet approximation. A plan with no floor at all is untouched —
+a wall-only plan is a legitimate work in progress.
 
 ### Minimum-panel tiling
 

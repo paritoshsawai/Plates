@@ -200,16 +200,19 @@ function validateArea(panels: Panel[], plot: Plot, category: PanelCategory): Val
     });
   }
 
-  // Partial cover is a warning, not an error: a deck or a partial mezzanine is
-  // a real design, and the architect may not want the whole footprint filled.
+  // Partial cover blocks the plan. Note this only runs once the category has at
+  // least one panel: a wall-only plan is a legitimate work in progress and must
+  // not be held back for having no floor yet. Once you have started a floor,
+  // though, a half-floored building is not something to send to a factory.
   const footprint = interiorCells(panels);
   const missing = footprint.cells.filter((cell) => !claimants.has(cellKey(cell)));
   if (missing.length > 0) {
     issues.push({
       code: 'area-incomplete',
-      severity: 'warning',
-      message: `${missing.length * 4} sq ft of the building has no ${category}. A 10 ft panel cannot reach a strip shallower than 10 ft.`,
+      severity: 'error',
+      message: `${missing.length * 4} sq ft of the building has no ${category}. A 10 ft panel cannot reach a strip shallower than 10 ft - resize that part of the building, or clear the ${category}.`,
       panelIds: [],
+      cells: missing,
     });
   }
 
@@ -230,4 +233,34 @@ export function wouldOverlap(panels: Panel[], candidate: Panel): boolean {
 export function isInsidePlot(plot: Plot, candidate: Panel): boolean {
   const end = panelEndNode(candidate);
   return containsSegment(plot, { x: candidate.x, y: candidate.y }, end);
+}
+
+/**
+ * Can this panel sit here?
+ *
+ * The plane-aware version of the two guards above, for moves that may carry
+ * either kind of panel. Walls, doors and windows share the edge plane; a floor
+ * collides only with other floors, a roof only with other roofs, because a
+ * floor and a roof over the same room are exactly what a building looks like.
+ */
+export function canPlace(panels: Panel[], plot: Plot, candidate: Panel): boolean {
+  if (isLinearCategory(candidate.category)) {
+    const others = panels.filter((p) => isLinearCategory(p.category));
+    return !wouldOverlap(others, candidate) && isInsidePlot(plot, candidate);
+  }
+
+  const occupied = new Set<string>();
+  for (const panel of panels) {
+    if (panel.id === candidate.id || panel.category !== candidate.category) continue;
+    for (const cell of panelCells(panel)) occupied.add(cellKey(cell));
+  }
+  return panelCells(candidate).every(
+    (cell) =>
+      !occupied.has(cellKey(cell)) &&
+      // A cell is in the plot when all four of its corners are.
+      containsPoint(plot, { x: cell.x, y: cell.y }) &&
+      containsPoint(plot, { x: cell.x + 1, y: cell.y }) &&
+      containsPoint(plot, { x: cell.x, y: cell.y + 1 }) &&
+      containsPoint(plot, { x: cell.x + 1, y: cell.y + 1 }),
+  );
 }

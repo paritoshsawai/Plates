@@ -85,6 +85,65 @@ export function IssueMarkers({ issues, scale }: IssueProps) {
   );
 }
 
+interface UncoveredProps {
+  issues: ValidationIssue[];
+  scale: number;
+}
+
+/**
+ * Shade the cells a floor or roof does not reach.
+ *
+ * The message already gives the area in square feet; this says *where*, which
+ * is the part that tells an architect which dimension to change.
+ */
+export function UncoveredArea({ issues, scale }: UncoveredProps) {
+  const cells = issues.flatMap((issue) => issue.cells ?? []);
+  if (cells.length === 0) return null;
+
+  return (
+    <>
+      {cells.map((cell, i) => (
+        <Rect
+          key={`uncovered-${i}`}
+          x={cell.x * PX_PER_UNIT}
+          y={cell.y * PX_PER_UNIT}
+          width={PX_PER_UNIT}
+          height={PX_PER_UNIT}
+          fill={COLORS.error}
+          opacity={0.18}
+          stroke={COLORS.error}
+          strokeWidth={Math.max(0.4, 0.75 / scale)}
+          listening={false}
+        />
+      ))}
+    </>
+  );
+}
+
+interface MarqueeProps {
+  rect: { x: number; y: number; width: number; height: number } | null;
+  scale: number;
+}
+
+/** The rubber-band selection box. */
+export function MarqueeBox({ rect, scale }: MarqueeProps) {
+  if (!rect) return null;
+  return (
+    <Rect
+      x={rect.x * PX_PER_UNIT}
+      y={rect.y * PX_PER_UNIT}
+      width={rect.width * PX_PER_UNIT}
+      height={rect.height * PX_PER_UNIT}
+      fill={COLORS.selection}
+      opacity={0.12}
+      stroke={COLORS.selection}
+      strokeWidth={Math.max(1, 1.5 / scale)}
+      dash={[5 / scale, 3 / scale]}
+      listening={false}
+    />
+  );
+}
+
 interface JunctionProps {
   junctions: Junction[];
   scale: number;

@@ -10,18 +10,21 @@ import {
   BrushPreview,
   IssueMarkers,
   JunctionMarkers,
+  MarqueeBox,
   RunDimensions,
+  UncoveredArea,
   WallPreview,
 } from './Annotations';
 import { COLORS, PX_PER_UNIT, fitToBox, nearestEdge, nearestNode, visibleUnits, zoomAt } from './view';
 import type { Viewport } from './view';
 import { plotBboxUnits } from '../core/plot';
 import { isInsidePlot, wouldOverlap } from '../core/validation';
-import { newPanelId } from '../core/panels';
+import { newPanelId, panelBoundsUnits, rectsIntersect } from '../core/panels';
 import { detectJunctions } from '../core/junctions';
 import { useStore } from '../state/store';
 import { isLinearCategory } from '../core/types';
 import type { GridEdge, GridPoint, Panel, ValidationResult } from '../core/types';
+import type { UnitRect } from '../core/panels';
 
 interface Props {
   validation: ValidationResult;
@@ -36,6 +39,12 @@ export function DesignCanvas({ validation, stageRef }: Props) {
   const [hoverEdge, setHoverEdge] = useState<GridEdge | null>(null);
   const [hoverRaw, setHoverRaw] = useState<GridPoint | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
+  const [marquee, setMarquee] = useState<UnitRect | null>(null);
+  // The drag in progress, kept in a ref so a move handler never reads a stale
+  // render's copy of it.
+  const marqueeStart = useRef<{ x: number; y: number; additive: boolean } | null>(null);
+  const marqueeRect = useRef<UnitRect | null>(null);
+  const panStart = useRef<{ screenX: number; screenY: number; x: number; y: number } | null>(null);
 
   const plan = useStore((s) => s.plan);
   const tool = useStore((s) => s.tool);
@@ -116,7 +125,51 @@ export function DesignCanvas({ validation, stageRef }: Props) {
     };
   }, []);
 
-  const panning = (tool === 'select' && !calibration.active) || spaceHeld;
+  /**
+   * Panning is hold-Space or middle-drag only.
+   *
+   * A plain drag in select mode now draws a selection box, which is what a
+   * drag on empty canvas means in every drawing tool. Space was already the
+   * documented pan modifier and is already hinted on screen, so nothing is
+   * lost by making it the way to pan.
+   */
+  const panning = spaceHeld;
+
+  // Middle-drag pans from anywhere, including over a panel, so it works even
+  // when the canvas is full. Konva's own stage drag cannot be limited to one
+  // button, hence moving the viewport by hand here.
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      const start = panStart.current;
+      if (!start) return;
+      setViewport((current) => ({
+        ...current,
+        x: start.x + (e.clientX - start.screenX),
+        y: start.y + (e.clientY - start.screenY),
+      }));
+    };
+    const up = () => {
+      panStart.current = null;
+      // The stage only sees a release over itself; this catches the rest.
+      finishMarquee.current();
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+  }, []);
+
+  /** Marquee is for plain select mode: anywhere else a click already means something. */
+  const marqueeArmed = tool === 'select' && !calibration.active && !openingBrush && !spaceHeld;
+
+  const rectBetween = (a: { x: number; y: number }, b: { x: number; y: number }): UnitRect => ({
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    width: Math.abs(a.x - b.x),
+    height: Math.abs(a.y - b.y),
+  });
 
   const readPointer = (stage: Konva.Stage) => {
     const point = stage.getRelativePointerPosition();
@@ -131,12 +184,31 @@ export function DesignCanvas({ validation, stageRef }: Props) {
     if (!point) return;
     setHoverNode(nearestNode(point.x, point.y));
     setHoverEdge(nearestEdge(point.x, point.y));
-    setHoverRaw({ x: point.x / PX_PER_UNIT, y: point.y / PX_PER_UNIT });
+    const units = { x: point.x / PX_PER_UNIT, y: point.y / PX_PER_UNIT };
+    setHoverRaw(units);
+    if (marqueeStart.current) {
+      const rect = rectBetween(marqueeStart.current, units);
+      marqueeRect.current = rect;
+      setMarquee(rect);
+    }
   };
 
   const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
     const stage = e.target.getStage();
-    if (!stage || e.target !== stage) return;
+    if (!stage) return;
+
+    if (e.evt.button === 1) {
+      e.evt.preventDefault();
+      panStart.current = {
+        screenX: e.evt.clientX,
+        screenY: e.evt.clientY,
+        x: stage.x(),
+        y: stage.y(),
+      };
+      return;
+    }
+
+    if (e.target !== stage || e.evt.button !== 0) return;
     const point = readPointer(stage);
     if (!point) return;
 
@@ -190,7 +262,53 @@ export function DesignCanvas({ validation, stageRef }: Props) {
       return;
     }
 
+    if (marqueeArmed) {
+      const units = { x: point.x / PX_PER_UNIT, y: point.y / PX_PER_UNIT };
+      marqueeStart.current = { ...units, additive: e.evt.shiftKey };
+      setMarquee({ ...units, width: 0, height: 0 });
+      return;
+    }
+
+    // Panning is a view change, not an edit: it must not drop the selection
+    // the user is part-way through building.
+    if (panning) return;
+
     clearSelection();
+  };
+
+  /**
+   * Close the marquee.
+   *
+   * It finishes from the last rectangle drawn rather than from the pointer at
+   * release, so letting go outside the canvas - which is exactly how you box
+   * everything along one edge - still selects what the box visibly covered.
+   * A box smaller than half a grid unit was a click, not a drag, so it keeps
+   * the old meaning of clearing the selection.
+   */
+  const finishMarquee = useRef<() => void>(() => {});
+  finishMarquee.current = () => {
+    const start = marqueeStart.current;
+    const rect = marqueeRect.current;
+    marqueeStart.current = null;
+    marqueeRect.current = null;
+    setMarquee(null);
+    if (!start) return;
+
+    const clearUnlessAdding = () => {
+      if (!start.additive) clearSelection();
+    };
+    if (!rect || (rect.width < 0.5 && rect.height < 0.5)) return clearUnlessAdding();
+
+    // Hidden layers are not selectable: the architect cannot see what they
+    // would be grabbing.
+    const hits = visible
+      .filter((panel) => rectsIntersect(panelBoundsUnits(panel), rect))
+      .map((panel) => panel.id);
+    if (hits.length === 0) return clearUnlessAdding();
+
+    // Shift *adds* here rather than toggling the way shift-click does: a box
+    // dragged over panels means "these too", never "un-pick these".
+    select(start.additive ? [...new Set([...selection, ...hits])] : hits);
   };
 
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -201,7 +319,17 @@ export function DesignCanvas({ validation, stageRef }: Props) {
     setViewport((current) => zoomAt(current, pointer, e.evt.deltaY));
   };
 
-  const cursor = calibration.active ? 'crosshair' : openingBrush ? 'cell' : panning ? 'grab' : tool === 'wall' ? 'crosshair' : 'copy';
+  const cursor = calibration.active
+    ? 'crosshair'
+    : openingBrush
+      ? 'cell'
+      : panning
+        ? 'grab'
+        : tool === 'wall'
+          ? 'crosshair'
+          : tool === 'select'
+            ? 'default'
+            : 'copy';
 
   return (
     <div ref={containerRef} className="relative h-full w-full bg-white" style={{ cursor }}>
@@ -225,6 +353,8 @@ export function DesignCanvas({ validation, stageRef }: Props) {
           setHoverRaw(null);
         }}
         onMouseDown={handleMouseDown}
+        onMouseUp={() => finishMarquee.current()}
+        onContextMenu={(e) => e.evt.preventDefault()}
         onWheel={handleWheel}
       >
         <Layer listening={false}>
@@ -290,6 +420,8 @@ export function DesignCanvas({ validation, stageRef }: Props) {
         <Layer listening={false}>
           <JunctionMarkers junctions={junctions} scale={viewport.scale} />
           <RunDimensions panels={linearPanels} scale={viewport.scale} />
+          <UncoveredArea issues={validation.errors} scale={viewport.scale} />
+          <MarqueeBox rect={marquee} scale={viewport.scale} />
           <IssueMarkers issues={validation.errors} scale={viewport.scale} />
           {tool === 'wall' && (
             <WallPreview
@@ -320,7 +452,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
           {hoverNode ? `${hoverNode.x * 2} ft, ${hoverNode.y * 2} ft` : '—'}
         </span>
         <span className="pointer-events-auto rounded bg-white/90 px-2 py-1 text-slate-600 ring-1 ring-slate-200">
-          Scroll to zoom &middot; hold Space to pan
+          Scroll to zoom &middot; drag to select &middot; Space or middle-drag to pan
         </span>
       </div>
 

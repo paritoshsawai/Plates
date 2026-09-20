@@ -1,4 +1,5 @@
 import { GRID_FT, WALL_HEIGHT_FT } from './units';
+import { isLinearCategory } from './types';
 import type {
   ConnectorType,
   GridCell,
@@ -166,6 +167,48 @@ export const AREA_DEPTH_UNITS = WALL_HEIGHT_FT / GRID_FT;
 
 export function cellKey(cell: GridCell): string {
   return `${cell.x},${cell.y}`;
+}
+
+/** An axis-aligned rectangle in grid units. */
+export interface UnitRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The rectangle a panel occupies in plan, in grid units.
+ *
+ * A linear panel has no thickness, so its rect is its run with zero depth; an
+ * area panel's is the block of cells it covers. Marquee selection needs one
+ * shape for both, without caring which model a category uses.
+ */
+export function panelBoundsUnits(panel: Panel): UnitRect {
+  const spec = getPanelSpec(panel.size);
+  if (isLinearCategory(panel.category)) {
+    const run = spec.widthUnits;
+    return panel.orientation === 'h'
+      ? { x: panel.x, y: panel.y, width: run, height: 0 }
+      : { x: panel.x, y: panel.y, width: 0, height: run };
+  }
+  const depth = spec.heightFt / GRID_FT;
+  return panel.orientation === 'h'
+    ? { x: panel.x, y: panel.y, width: spec.widthUnits, height: depth }
+    : { x: panel.x, y: panel.y, width: depth, height: spec.widthUnits };
+}
+
+/**
+ * Whether two rectangles touch. Inclusive at the edges, so a zero-height wall
+ * rect lying exactly on the marquee's border still counts as caught.
+ */
+export function rectsIntersect(a: UnitRect, b: UnitRect): boolean {
+  return (
+    a.x <= b.x + b.width &&
+    a.x + a.width >= b.x &&
+    a.y <= b.y + b.height &&
+    a.y + a.height >= b.y
+  );
 }
 
 export function edgeKey(edge: GridEdge): string {
