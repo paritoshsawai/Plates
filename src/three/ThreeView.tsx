@@ -1,6 +1,21 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { boundingSphere, buildScene, disposeScene, fitRadius } from './scene';
+import {
+  PHI_MAX,
+  PHI_MIN,
+  SETTLE_EPSILON,
+  applyOrbit,
+  cursorAnchor,
+  dampen,
+  dollyAboutPoint,
+  normalizeWheelDelta,
+  orbitRadiansPerPixel,
+  panTarget,
+  panWorldPerPixel,
+  zoomFactor,
+} from './controls';
+import type { Orbit } from './controls';
 import { useStore } from '../state/store';
 import type { Panel } from '../core/types';
 
@@ -9,24 +24,21 @@ import type { Panel } from '../core/types';
  *
  * drei's OrbitControls would arrive with react-three-fiber, which currently
  * pins React below the version this app runs on and pulls an Expo peer tree
- * behind it. Orbiting a fixed target is a few lines of spherical coordinates,
- * so the dependency is not worth taking for it.
+ * behind it. The rig itself lives in `controls.ts`, where it is unit-tested
+ * without a canvas; this file is the glue between pointer events and that rig.
+ *
+ * Input writes the *desired* orbit and the render loop eases the *current* one
+ * towards it, which is what makes a drag glide rather than step. When the two
+ * agree the loop stops drawing until something changes again.
  */
-interface Orbit {
-  radius: number;
-  theta: number;
-  phi: number;
-  target: THREE.Vector3;
-}
 
-function applyOrbit(camera: THREE.PerspectiveCamera, orbit: Orbit): void {
-  const { radius, theta, phi, target } = orbit;
-  camera.position.set(
-    target.x + radius * Math.sin(phi) * Math.sin(theta),
-    target.y + radius * Math.cos(phi),
-    target.z + radius * Math.sin(phi) * Math.cos(theta),
-  );
-  camera.lookAt(target);
+/** Easing time constant, in seconds. Long enough to smooth, short enough not to lag. */
+const SMOOTHING_TAU = 0.07;
+
+const FOV_DEGREES = 50;
+
+function cloneOrbit(orbit: Orbit): Orbit {
+  return { ...orbit, target: orbit.target.clone() };
 }
 
 export default function ThreeView() {
@@ -44,12 +56,15 @@ export default function ThreeView() {
   // view out from under them.
   const touchedRef = useRef(false);
   const fitRef = useRef<(() => void) | null>(null);
-  const orbitRef = useRef<Orbit>({
+  const invalidateRef = useRef<(() => void) | null>(null);
+
+  const desiredRef = useRef<Orbit>({
     radius: 80,
     theta: Math.PI * 0.75,
     phi: Math.PI * 0.35,
     target: new THREE.Vector3(),
   });
+  const currentRef = useRef<Orbit>(cloneOrbit(desiredRef.current));
 
   useEffect(() => {
     const container = containerRef.current;
@@ -68,7 +83,12 @@ export default function ThreeView() {
     ground.position.y = -0.05;
     scene.add(ground);
 
-    const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 2000);
+    const camera = new THREE.PerspectiveCamera(FOV_DEGREES, 1, 0.5, 4000);
+    // A second camera parked at the *desired* orbit. Pan and zoom read their
+    // basis and their cursor ray from this rather than from the on-screen
+    // camera, so repeated input while the easing is still settling composes
+    // exactly instead of drifting.
+    const aim = new THREE.PerspectiveCamera(FOV_DEGREES, 1, 0.5, 4000);
 
     let renderer: THREE.WebGLRenderer;
     try {
@@ -77,17 +97,37 @@ export default function ThreeView() {
       container.textContent = 'This browser cannot render 3D (WebGL is unavailable).';
       return;
     }
-    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
     container.appendChild(renderer.domElement);
     renderer.domElement.style.display = 'block';
     renderer.domElement.style.touchAction = 'none';
 
+    /** Ask for a frame. Everything that changes what is on screen calls this. */
+    let dirty = true;
+    const invalidate = () => {
+      dirty = true;
+    };
+    invalidateRef.current = invalidate;
+
+    let viewportHeightPx = 1;
+
     const resize = () => {
       const { clientWidth, clientHeight } = container;
       if (clientWidth === 0 || clientHeight === 0) return;
-      renderer.setSize(clientWidth, clientHeight, false);
+      viewportHeightPx = clientHeight;
+      // setPixelRatio before setSize: it re-runs setSize itself with
+      // updateStyle off, so it has to go first or it would undo the CSS size.
+      renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+      // updateStyle is left at its default of true on purpose. With it off,
+      // three sets the canvas's pixel dimensions - which it multiplies by the
+      // pixel ratio - but never its CSS size, so on any HiDPI display the
+      // canvas lays out at twice its container and most of the render ends up
+      // off-screen. That was the long-standing "cannot see the whole plan" bug.
+      renderer.setSize(clientWidth, clientHeight);
       camera.aspect = clientWidth / clientHeight;
       camera.updateProjectionMatrix();
+      aim.aspect = camera.aspect;
+      aim.updateProjectionMatrix();
+      invalidate();
     };
     const observer = new ResizeObserver(() => {
       resize();
@@ -98,8 +138,22 @@ export default function ThreeView() {
     observer.observe(container);
     resize();
 
+    /** Park the scratch camera at the orbit the user is heading towards. */
+    const syncAim = () => {
+      applyOrbit(aim, desiredRef.current);
+      return aim;
+    };
+
+    // How close you may get and how far you may back off. Derived from the
+    // model in fit(), so a small building can be inspected up close and a
+    // large one can still be seen whole.
+    let minRadius = 2;
+    let maxRadius = 600;
+    const clampRadius = (r: number) => Math.min(maxRadius, Math.max(minRadius, r));
+
     // Orbit, pan and zoom.
     let dragging: 'orbit' | 'pan' | null = null;
+    let activePointer: number | null = null;
     let lastX = 0;
     let lastY = 0;
     // How far the pointer travelled since it went down. Orbiting ends with a
@@ -108,49 +162,92 @@ export default function ThreeView() {
     let travelled = 0;
     const CLICK_SLOP_PX = 5;
 
+    const endDrag = () => {
+      if (activePointer !== null) {
+        try {
+          renderer.domElement.releasePointerCapture(activePointer);
+        } catch {
+          // The pointer is already gone; nothing to release.
+        }
+      }
+      dragging = null;
+      activePointer = null;
+    };
+
     const onPointerDown = (e: PointerEvent) => {
       // Right and middle button pan, as in every CAD tool; shift-drag does too,
       // for trackpads with no second button.
-      dragging = e.button === 2 || e.button === 1 || e.shiftKey ? 'pan' : 'orbit';
+      const mode = e.button === 2 || e.button === 1 || e.shiftKey ? 'pan' : 'orbit';
+      // Keeps a drag from also starting a text selection on the page, which
+      // leaves the cursor stuck in an I-beam and the drag feeling gritty.
+      e.preventDefault();
+      try {
+        renderer.domElement.setPointerCapture(e.pointerId);
+        activePointer = e.pointerId;
+      } catch {
+        // Capture can be refused if the pointer has already been released. In
+        // that case do not start a drag at all: without capture the matching
+        // pointerup may never arrive and the camera would follow the bare
+        // mouse with no button held.
+        return;
+      }
+      dragging = mode;
       lastX = e.clientX;
       lastY = e.clientY;
       travelled = 0;
-      renderer.domElement.setPointerCapture(e.pointerId);
     };
+
     const onPointerMove = (e: PointerEvent) => {
       if (!dragging) return;
+      // A release the page never saw - an alt-tab mid-drag, a devtools break -
+      // leaves no button down. Treat that as the end of the drag.
+      if (e.buttons === 0) {
+        endDrag();
+        return;
+      }
+
       const dx = e.clientX - lastX;
       const dy = e.clientY - lastY;
       lastX = e.clientX;
       lastY = e.clientY;
       travelled += Math.abs(dx) + Math.abs(dy);
       if (travelled > CLICK_SLOP_PX) touchedRef.current = true;
-      const orbit = orbitRef.current;
+
+      const desired = desiredRef.current;
       if (dragging === 'orbit') {
-        orbit.theta -= dx * 0.008;
+        const perPixel = orbitRadiansPerPixel(viewportHeightPx);
+        desired.theta -= dx * perPixel;
         // Stop just short of the poles, where the view flips over.
-        orbit.phi = Math.min(Math.PI / 2.05, Math.max(0.12, orbit.phi - dy * 0.006));
+        desired.phi = Math.min(PHI_MAX, Math.max(PHI_MIN, desired.phi - dy * perPixel));
       } else {
-        // Pan across the screen, not the world: horizontal drag slides along
-        // the camera's right vector, vertical drag lifts the target as well as
-        // sliding it, so a tall building can be raised into frame.
-        const scale = orbit.radius * 0.0016;
-        const cos = Math.cos(orbit.theta);
-        const sin = Math.sin(orbit.theta);
-        orbit.target.x -= dx * cos * scale - dy * Math.cos(orbit.phi) * sin * scale;
-        orbit.target.z += dx * sin * scale + dy * Math.cos(orbit.phi) * cos * scale;
-        orbit.target.y += dy * Math.sin(orbit.phi) * scale;
+        panTarget(
+          syncAim(),
+          desired.target,
+          dx,
+          dy,
+          panWorldPerPixel(desired.radius, FOV_DEGREES, viewportHeightPx),
+        );
       }
+      invalidate();
     };
-    const onPointerUp = (e: PointerEvent) => {
-      dragging = null;
-      renderer.domElement.releasePointerCapture?.(e.pointerId);
-    };
+
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       touchedRef.current = true;
-      const orbit = orbitRef.current;
-      orbit.radius = Math.min(600, Math.max(6, orbit.radius * (e.deltaY > 0 ? 1.1 : 1 / 1.1)));
+
+      const desired = desiredRef.current;
+      const rect = renderer.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+
+      // Proportional to how far the wheel actually turned, so a trackpad's
+      // stream of tiny events is a gentle zoom rather than twenty full steps.
+      const factor = zoomFactor(normalizeWheelDelta(e.deltaY, e.deltaMode));
+      const clamped = clampRadius(desired.radius * factor) / desired.radius;
+      dollyAboutPoint(desired, cursorAnchor(syncAim(), ndc, desired.target), clamped);
+      invalidate();
     };
 
     // Clicking a mesh selects the panel it came from, in both views.
@@ -182,8 +279,12 @@ export default function ThreeView() {
       const box = new THREE.Box3().setFromObject(model);
       if (box.isEmpty()) return;
       const sphere = boundingSphere(box);
-      orbitRef.current.target.copy(sphere.centre);
-      orbitRef.current.radius = fitRadius(sphere.radius, camera.fov, camera.aspect);
+      minRadius = Math.max(1, sphere.radius * 0.08);
+      maxRadius = Math.max(200, sphere.radius * 12);
+      const desired = desiredRef.current;
+      desired.target.copy(sphere.centre);
+      desired.radius = clampRadius(fitRadius(sphere.radius, camera.fov, camera.aspect));
+      invalidate();
     };
     fitRef.current = fit;
 
@@ -191,28 +292,74 @@ export default function ThreeView() {
     element.addEventListener('contextmenu', onContextMenu);
     element.addEventListener('pointerdown', onPointerDown);
     element.addEventListener('pointermove', onPointerMove);
-    element.addEventListener('pointerup', onPointerUp);
+    element.addEventListener('pointerup', endDrag);
+    element.addEventListener('pointercancel', endDrag);
+    element.addEventListener('lostpointercapture', endDrag);
     element.addEventListener('wheel', onWheel, { passive: false });
     element.addEventListener('click', onClick);
 
+    /** Ease `current` towards `desired`; report whether anything still moves. */
+    const settle = (dt: number): boolean => {
+      const desired = desiredRef.current;
+      const current = currentRef.current;
+      const scale = Math.max(1, desired.radius);
+
+      const moved =
+        Math.abs(desired.radius - current.radius) / scale > SETTLE_EPSILON ||
+        Math.abs(desired.theta - current.theta) > SETTLE_EPSILON ||
+        Math.abs(desired.phi - current.phi) > SETTLE_EPSILON ||
+        desired.target.distanceTo(current.target) / scale > SETTLE_EPSILON;
+
+      if (!moved) {
+        // Snap, so the two never sit a hair apart and re-trigger forever.
+        current.radius = desired.radius;
+        current.theta = desired.theta;
+        current.phi = desired.phi;
+        current.target.copy(desired.target);
+        return false;
+      }
+
+      current.radius = dampen(current.radius, desired.radius, dt, SMOOTHING_TAU);
+      current.theta = dampen(current.theta, desired.theta, dt, SMOOTHING_TAU);
+      current.phi = dampen(current.phi, desired.phi, dt, SMOOTHING_TAU);
+      current.target.set(
+        dampen(current.target.x, desired.target.x, dt, SMOOTHING_TAU),
+        dampen(current.target.y, desired.target.y, dt, SMOOTHING_TAU),
+        dampen(current.target.z, desired.target.z, dt, SMOOTHING_TAU),
+      );
+      return true;
+    };
+
     let frame = 0;
-    const tick = () => {
-      applyOrbit(camera, orbitRef.current);
-      renderer.render(scene, camera);
+    let lastTime = performance.now();
+    const tick = (now: number) => {
+      // Cap dt so a backgrounded tab does not resume with one enormous step.
+      const dt = Math.min(0.1, (now - lastTime) / 1000);
+      lastTime = now;
+
+      const moving = settle(dt);
+      if (moving || dirty) {
+        dirty = false;
+        applyOrbit(camera, currentRef.current);
+        renderer.render(scene, camera);
+      }
       frame = requestAnimationFrame(tick);
     };
-    tick();
+    frame = requestAnimationFrame(tick);
 
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
       element.removeEventListener('pointerdown', onPointerDown);
       element.removeEventListener('pointermove', onPointerMove);
-      element.removeEventListener('pointerup', onPointerUp);
+      element.removeEventListener('pointerup', endDrag);
+      element.removeEventListener('pointercancel', endDrag);
+      element.removeEventListener('lostpointercapture', endDrag);
       element.removeEventListener('wheel', onWheel);
       element.removeEventListener('click', onClick);
       element.removeEventListener('contextmenu', onContextMenu);
       fitRef.current = null;
+      invalidateRef.current = null;
       if (modelRef.current) disposeScene(modelRef.current);
       renderer.dispose();
       element.remove();
@@ -237,6 +384,7 @@ export default function ThreeView() {
 
     // Frame it, unless the user has already moved the camera themselves.
     if (!touchedRef.current) fitRef.current?.();
+    invalidateRef.current?.();
   }, [panels]);
 
   // Highlight the selected panels by brightening their material.
@@ -249,25 +397,26 @@ export default function ThreeView() {
       material.emissive.set(selected.has(id) ? '#f59e0b' : '#000000');
       material.emissiveIntensity = selected.has(id) ? 0.55 : 0;
     }
+    invalidateRef.current?.();
   }, [selection, panels]);
 
   /** Point the camera from a fixed direction, then re-fit. */
   const setView = (theta: number, phi: number) => {
-    orbitRef.current.theta = theta;
-    orbitRef.current.phi = phi;
+    desiredRef.current.theta = theta;
+    desiredRef.current.phi = phi;
     touchedRef.current = false;
     fitRef.current?.();
   };
 
   return (
-    <div className="relative h-full w-full">
-      <div ref={containerRef} className="h-full w-full" />
+    <div className="relative h-full w-full overflow-hidden">
+      <div ref={containerRef} className="h-full w-full overflow-hidden" />
 
       <div className="absolute right-3 top-3 flex gap-1.5">
         {([
           ['Fit', null],
-          ['Top', [Math.PI, 0.13]],
-          ['Front', [Math.PI, Math.PI / 2.05]],
+          ['Top', [Math.PI, PHI_MIN]],
+          ['Front', [Math.PI, PHI_MAX]],
           ['Iso', [Math.PI * 0.75, Math.PI * 0.35]],
         ] as const).map(([label, angles]) => (
           <button
@@ -288,8 +437,8 @@ export default function ThreeView() {
       </div>
 
       <p className="pointer-events-none absolute inset-x-0 bottom-0 p-3 text-center text-xs text-slate-500">
-        Drag to orbit &middot; right-drag or shift-drag to pan &middot; scroll to zoom &middot;
-        click a panel to select it
+        Drag to orbit &middot; right-drag, middle-drag or shift-drag to pan &middot; scroll to zoom
+        at the cursor &middot; click a panel to select it
       </p>
       {panels.length === 0 && (
         <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-500">

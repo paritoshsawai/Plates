@@ -11,7 +11,7 @@ length is a multiple of 2 ft tiles exactly with zero offcut, and nothing else ca
 ```bash
 npm install
 npm run dev       # http://localhost:5173
-npm test          # 228 unit tests over the geometry, tiling, BOM, pricing, store and 3D
+npm test          # 266 unit tests over the geometry, tiling, BOM, pricing, store and 3D
 npm run build     # typecheck + production bundle
 ```
 
@@ -111,6 +111,8 @@ src/core/        Pure domain logic — no DOM, no React. All of it unit-tested.
   plan.ts          Plan documents, strict parsing of untrusted JSON
   workorder.ts     The BOM as an ERP payload
 src/canvas/      Konva rendering and screen ⇄ world mapping
+src/three/       The 3D view: scene built from the panel list, orbit camera
+  controls.ts      The camera rig and its arithmetic — pure, unit-tested
 src/components/  Rails, dialogs, top bar
 src/state/       Zustand store (undo/redo) and the plan repository
 src/export/      CSV, PDF, download plumbing

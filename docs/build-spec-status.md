@@ -71,6 +71,18 @@ satisfies the item.
   it is resized. That is what "panels are never cut" costs. A plan with **no** floor at all is
   untouched: a wall-only plan is a legitimate work in progress.
 
+- **The 3D camera reads its pan basis off the camera matrix, not from trigonometry.** An earlier
+  hand-derived version had the sign of both ground-plane terms inverted, so a vertical drag sheared
+  the model diagonally instead of following the cursor. Zoom is exponential in the wheel delta and
+  anchored to the point under the cursor, rather than a flat step towards the target centre — a
+  trackpad emits dozens of tiny wheel events where a mouse emits one, and treating each as a full
+  step made a gentle two-finger flick a 6.7x zoom.
+- **The 3D canvas must be sized with `updateStyle` left on.** `renderer.setSize(w, h, false)` sets
+  the canvas's pixel dimensions but not its CSS size, so on a HiDPI display it lays out at
+  `devicePixelRatio` times its container: most of the render lands off-screen and the GPU draws
+  four times the pixels needed. Browser verification now runs at `deviceScaleFactor: 2`, because at
+  1 this bug is invisible and survived three rounds of checks.
+
 ## Still not built
 
 Multi-storey stacking · DXF export and factory view · branded client-shareable quote links ·
@@ -98,11 +110,13 @@ modelling one.
 
 ## Test coverage
 
-228 unit tests across `core/`, `state/`, `three/` and `canvas/view.ts`, plus a Playwright drive of the built app that
+266 unit tests across `core/`, `state/`, `three/` and `canvas/view.ts`, plus a Playwright drive of the built app that
 exercises drawing, selection, deletion, undo, the placement guards, pricing, all five exports, save
 and reopen, and the read-only client view. Drawing a 20 × 16 ft room in the browser produces the
 same 18 panels / 72 linear ft the unit tests assert.
 
 The browser drive is not a formality — it is what caught the corner-click, `nearestEdge` and
-PDF-encoding bugs, and in this round two more that no unit test would have: a marquee left open
-when the mouse is released off-canvas, and a space-drag pan silently clearing the selection.
+PDF-encoding bugs, a marquee left open when the mouse is released off-canvas, and a space-drag pan
+silently clearing the selection. It runs at `deviceScaleFactor: 2` as well as 1, which is what
+finally exposed the HiDPI canvas sizing bug: at a device pixel ratio of 1 that defect is completely
+invisible.

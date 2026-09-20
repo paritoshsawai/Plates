@@ -298,7 +298,7 @@ export default function App() {
           </div>
 
           {view === '3d' && (
-            <div className="min-h-0 flex-1">
+            <div className="min-h-0 flex-1 overflow-hidden">
               <Suspense
                 fallback={
                   <p className="flex h-full items-center justify-center text-sm text-slate-500">
