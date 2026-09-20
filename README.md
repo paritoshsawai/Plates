@@ -13,6 +13,7 @@ npm install
 npm run dev       # http://localhost:5173
 npm test          # 266 unit tests over the geometry, tiling, BOM, pricing, store and 3D
 npm run build     # typecheck + production bundle
+npm run stage:artifact   # stage dist/ for publishing, with an asset-reference check
 ```
 
 ## What it does
@@ -116,6 +117,7 @@ src/three/       The 3D view: scene built from the panel list, orbit camera
 src/components/  Rails, dialogs, top bar
 src/state/       Zustand store (undo/redo) and the plan repository
 src/export/      CSV, PDF, download plumbing
+scripts/         stage-artifact.mjs - builds the publishable page from dist/
 ```
 
 `src/core` has no imports from anything above it, which is why the interesting logic is testable
