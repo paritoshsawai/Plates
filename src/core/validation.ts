@@ -7,11 +7,14 @@
  * near-miss geometry.
  */
 
-import { isKnownCategory, isKnownPanelSize, panelEdges, panelEndNode } from './panels';
-import { containsSegment } from './plot';
+import { cellKey, isKnownCategory, isKnownPanelSize, panelCells, panelEdges, panelEndNode } from './panels';
+import { containsPoint, containsSegment } from './plot';
+import { interiorCells } from './footprint';
+import { isLinearCategory } from './types';
+import { AREA_CATEGORIES } from './types';
 import { unitsToFt } from './units';
 import { buildEdgeIndex, buildNodeIndex, countComponents } from './walls';
-import type { Panel, Plot, ValidationIssue, ValidationResult } from './types';
+import type { Panel, PanelCategory, Plot, ValidationIssue, ValidationResult } from './types';
 
 function emptyResult(issues: ValidationIssue[], manufacturable: boolean): ValidationResult {
   const errors = issues.filter((i) => i.severity === 'error');
@@ -66,7 +69,12 @@ export function validatePlan(panels: Panel[], plot: Plot): ValidationResult {
   }
   if (issues.some((i) => i.severity === 'error')) return emptyResult(issues, false);
 
-  const index = buildEdgeIndex(panels);
+  // Each plane is validated on its own. Wall, door and window share the wall
+  // line; floor and roof are separate surfaces that legitimately sit above and
+  // below the same ground. Feeding them all to one index would report a floor
+  // and a roof over the same room as an overlap.
+  const linear = panels.filter((panel) => isLinearCategory(panel.category));
+  const index = buildEdgeIndex(linear);
 
   // 2. Overlaps: two panels claiming the same 2 ft edge.
   const overlapPanels = new Set<string>();
@@ -84,7 +92,7 @@ export function validatePlan(panels: Panel[], plot: Plot): ValidationResult {
 
   // 3. Out of bounds: a wall segment that leaves the plot.
   const outsidePanels = new Set<string>();
-  for (const panel of panels) {
+  for (const panel of linear) {
     for (const edge of panelEdges(panel)) {
       const a = { x: edge.x, y: edge.y };
       const b = edge.axis === 'h' ? { x: edge.x + 1, y: edge.y } : { x: edge.x, y: edge.y + 1 };
@@ -105,7 +113,7 @@ export function validatePlan(panels: Panel[], plot: Plot): ValidationResult {
 
   // 4. Gaps: an open wall end is a node with exactly one occupied edge. Every
   //    wall must run into another wall, so degree 1 anywhere means a hole.
-  const nodes = buildNodeIndex(panels, index);
+  const nodes = buildNodeIndex(linear, index);
   for (const info of nodes.values()) {
     if (info.degree === 1) {
       issues.push({
@@ -132,8 +140,80 @@ export function validatePlan(panels: Panel[], plot: Plot): ValidationResult {
     });
   }
 
+  // 6. Area categories, each on its own plane.
+  for (const category of AREA_CATEGORIES) {
+    issues.push(...validateArea(panels, plot, category));
+  }
+
   const hasErrors = issues.some((i) => i.severity === 'error');
   return emptyResult(issues, !hasErrors);
+}
+
+/**
+ * Floor and roof checks. These run per category, because a floor and a roof
+ * over the same room share every cell and that is correct, not a collision.
+ */
+function validateArea(panels: Panel[], plot: Plot, category: PanelCategory): ValidationIssue[] {
+  const area = panels.filter((panel) => panel.category === category);
+  if (area.length === 0) return [];
+
+  const issues: ValidationIssue[] = [];
+
+  const claimants = new Map<string, string[]>();
+  const outside = new Set<string>();
+  for (const panel of area) {
+    for (const cell of panelCells(panel)) {
+      const key = cellKey(cell);
+      const existing = claimants.get(key);
+      if (existing) existing.push(panel.id);
+      else claimants.set(key, [panel.id]);
+
+      // A cell is in the plot when all four of its corners are.
+      const inPlot =
+        containsPoint(plot, { x: cell.x, y: cell.y }) &&
+        containsPoint(plot, { x: cell.x + 1, y: cell.y }) &&
+        containsPoint(plot, { x: cell.x, y: cell.y + 1 }) &&
+        containsPoint(plot, { x: cell.x + 1, y: cell.y + 1 });
+      if (!inPlot) outside.add(panel.id);
+    }
+  }
+
+  const overlapping = new Set<string>();
+  for (const ids of claimants.values()) {
+    if (ids.length > 1) for (const id of ids) overlapping.add(id);
+  }
+  if (overlapping.size > 0) {
+    issues.push({
+      code: 'area-overlap',
+      severity: 'error',
+      message: `${overlapping.size} ${category} panels overlap. Each 2 ft square must be covered by exactly one.`,
+      panelIds: [...overlapping],
+    });
+  }
+
+  if (outside.size > 0) {
+    issues.push({
+      code: 'area-outside-plot',
+      severity: 'error',
+      message: `${outside.size} ${category} panels fall outside the plot boundary.`,
+      panelIds: [...outside],
+    });
+  }
+
+  // Partial cover is a warning, not an error: a deck or a partial mezzanine is
+  // a real design, and the architect may not want the whole footprint filled.
+  const footprint = interiorCells(panels);
+  const missing = footprint.cells.filter((cell) => !claimants.has(cellKey(cell)));
+  if (missing.length > 0) {
+    issues.push({
+      code: 'area-incomplete',
+      severity: 'warning',
+      message: `${missing.length * 4} sq ft of the building has no ${category}. A 10 ft panel cannot reach a strip shallower than 10 ft.`,
+      panelIds: [],
+    });
+  }
+
+  return issues;
 }
 
 /** Convenience for the canvas: does this placement collide with what's there? */

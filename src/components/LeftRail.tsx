@@ -1,9 +1,11 @@
 import {
   CATEGORY_STYLE,
+  FILLABLE_CATEGORIES,
   OPENING_CATEGORIES,
   PANEL_CATALOG,
   PLACEABLE_CATEGORIES,
 } from '../core/panels';
+import type { PanelCategory } from '../core/types';
 import { GRID_FT, WALL_HEIGHT_FT, formatFt } from '../core/units';
 import { plotAreaSqFt, plotEdgeLengthsFt } from '../core/plot';
 import { useStore } from '../state/store';
@@ -31,6 +33,13 @@ export function LeftRail({ onEditPlot }: Props) {
   const selection = useStore((s) => s.selection);
   const panels = useStore((s) => s.plan.panels);
   const splitPanel = useStore((s) => s.splitPanel);
+  const fillArea = useStore((s) => s.fillArea);
+  const clearArea = useStore((s) => s.clearArea);
+  const hiddenLayers = useStore((s) => s.hiddenLayers);
+  const toggleLayer = useStore((s) => s.toggleLayer);
+
+  const countIn = (category: PanelCategory) =>
+    panels.filter((p) => p.category === category).length;
 
   // Splitting only means anything for a 4 ft panel.
   const splittable = selection.filter(
@@ -131,6 +140,50 @@ export function LeftRail({ onEditPlot }: Props) {
           common divisor of the two widths.
         </p>
       </section>
+
+      {!readOnly && (
+        <section>
+          <SectionTitle>Floor &amp; roof</SectionTitle>
+          <div className="grid gap-1.5">
+            {FILLABLE_CATEGORIES.map((category) => {
+              const count = countIn(category);
+              return (
+                <div key={category} className="rounded-md border border-slate-200 px-2.5 py-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-sm"
+                      style={{ backgroundColor: CATEGORY_STYLE[category].color }}
+                    />
+                    <span className="flex-1 text-sm text-slate-700">
+                      {CATEGORY_STYLE[category].plural}
+                    </span>
+                    <span className="text-xs tabular-nums text-slate-500">{count}</span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <Button onClick={() => fillArea(category)}>
+                      {count > 0 ? 'Refill' : 'Fill'}
+                    </Button>
+                    {count > 0 && (
+                      <>
+                        <Button variant="danger" onClick={() => clearArea(category)}>
+                          Clear
+                        </Button>
+                        <Button variant="ghost" onClick={() => toggleLayer(category)}>
+                          {hiddenLayers.includes(category) ? 'Show' : 'Hide'}
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs leading-snug text-slate-500">
+            Panels lie flat here, so their 10 ft dimension is in plan: they fill the building in
+            10 ft strips. Anything shallower than 10 ft is reported, never approximated.
+          </p>
+        </section>
+      )}
 
       {!readOnly && (
         <section>

@@ -4,6 +4,8 @@ import { flipOrientation, getPanelSpec, newPanelId } from '../core/panels';
 import { isOpeningCategory } from '../core/types';
 import { normalizePlot } from '../core/plot';
 import { tileRun } from '../core/tiling';
+import { bestTileFootprint } from '../core/areaTiling';
+import { interiorCells } from '../core/footprint';
 import type {
   Orientation,
   Panel,
@@ -50,6 +52,8 @@ export interface AppState {
    * selecting it. Null means the normal select behaviour.
    */
   openingBrush: PanelCategory | null;
+  /** Categories currently drawn. Hiding one never deletes its panels. */
+  hiddenLayers: PanelCategory[];
   selection: string[];
   /** First node clicked with the wall tool, if a run is in progress. */
   wallAnchor: { x: number; y: number } | null;
@@ -78,6 +82,9 @@ export interface AppState {
   placeBrush(x: number, y: number, orientation: Orientation): void;
   setPanelCategory(id: string, category: PanelCategory): void;
   splitPanel(id: string): void;
+  fillArea(category: PanelCategory): void;
+  clearArea(category: PanelCategory): void;
+  toggleLayer(category: PanelCategory): void;
   autoFillRun(from: { x: number; y: number }, to: { x: number; y: number }): void;
   movePanel(id: string, x: number, y: number): void;
   rotateSelection(): void;
@@ -137,6 +144,7 @@ export const useStore = create<AppState>()((set, get) => {
     brushOrientation: 'h',
     activeCategory: 'wall',
     openingBrush: null,
+    hiddenLayers: [],
     selection: [],
     wallAnchor: null,
     message: null,
@@ -253,6 +261,55 @@ export const useStore = create<AppState>()((set, get) => {
         panels.splice(index, 1, ...halves);
         return { ...doc, panels };
       }),
+
+    /**
+     * Lay a floor or roof over the building the walls enclose.
+     *
+     * Replaces that category wholesale rather than adding to it: filling twice
+     * should give the same result as filling once, not two stacked floors.
+     * Strips run whichever way covers more, since an architect should not have
+     * to work out which axis divides by 10 ft.
+     */
+    fillArea: (category) => {
+      const footprint = interiorCells(get().plan.panels);
+      if (footprint.cells.length === 0) {
+        get().notify('Close the walls into a room before filling a floor or roof.', 'error');
+        return;
+      }
+
+      const result = bestTileFootprint(footprint, category);
+      if (result.panels.length === 0) {
+        get().notify(
+          `No part of this building is 10 ft deep, so no ${category} panel fits.`,
+          'error',
+        );
+        return;
+      }
+
+      commit((doc) => ({
+        ...doc,
+        panels: [...doc.panels.filter((p) => p.category !== category), ...result.panels],
+      }));
+
+      if (result.uncoveredSqFt > 0) {
+        get().notify(
+          `${result.uncoveredSqFt} sq ft has no ${category}: a 10 ft panel cannot reach a strip that shallow.`,
+        );
+      }
+    },
+
+    clearArea: (category) =>
+      commit((doc) => {
+        const panels = doc.panels.filter((p) => p.category !== category);
+        return panels.length === doc.panels.length ? null : { ...doc, panels };
+      }),
+
+    toggleLayer: (category) =>
+      set((state) => ({
+        hiddenLayers: state.hiddenLayers.includes(category)
+          ? state.hiddenLayers.filter((c) => c !== category)
+          : [...state.hiddenLayers, category],
+      })),
 
     autoFillRun: (from, to) => {
       const dx = to.x - from.x;

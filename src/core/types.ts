@@ -93,6 +93,16 @@ export interface GridPoint {
 }
 
 /**
+ * One grid cell: the 2 ft x 2 ft square whose top-left corner is (x, y).
+ * Floor and roof panels are built from these, the way walls are built from
+ * edges.
+ */
+export interface GridCell {
+  x: number;
+  y: number;
+}
+
+/**
  * One grid edge: the 2 ft segment from (x, y) to (x+1, y) when axis is 'h',
  * or to (x, y+1) when axis is 'v'. Walls are built from these; corners are the
  * dimensionless nodes where edges meet, which is why no panel is ever counted
@@ -216,7 +226,10 @@ export type IssueCode =
   | 'off-grid'
   | 'disconnected'
   | 'unknown-panel'
-  | 'empty-plan';
+  | 'empty-plan'
+  | 'area-overlap'
+  | 'area-outside-plot'
+  | 'area-incomplete';
 
 export interface ValidationIssue {
   code: IssueCode;

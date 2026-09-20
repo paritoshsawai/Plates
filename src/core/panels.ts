@@ -1,6 +1,7 @@
 import { GRID_FT, WALL_HEIGHT_FT } from './units';
 import type {
   ConnectorType,
+  GridCell,
   GridEdge,
   Orientation,
   Panel,
@@ -57,6 +58,9 @@ export const CONNECTOR_STYLE: Record<ConnectorType, { label: string; plural: str
 
 /** Categories the architect can draw runs in. Floor and roof arrive in Phase 3. */
 export const PLACEABLE_CATEGORIES: readonly PanelCategory[] = ['wall'];
+
+/** Categories filled from the building footprint rather than drawn by hand. */
+export const FILLABLE_CATEGORIES: readonly PanelCategory[] = ['floor', 'roof'];
 
 /**
  * Categories applied by converting an existing panel rather than by drawing.
@@ -129,6 +133,39 @@ export function panelEdges(panel: Panel): GridEdge[] {
     );
   }
   return edges;
+}
+
+/**
+ * The grid cells an area panel covers.
+ *
+ * Lying flat, both catalog sizes are 10 ft - five grid units - in the
+ * dimension a wall would stand up in. `orientation` says which way the
+ * panel's *width* runs; the 10 ft depth runs perpendicular to it. So a floor
+ * 4x10 laid horizontally is 2 cells wide and 5 deep.
+ */
+export function panelCells(panel: Panel): GridCell[] {
+  const spec = getPanelSpec(panel.size);
+  const widthUnits = spec.widthUnits;
+  const depthUnits = spec.heightFt / GRID_FT;
+
+  const cells: GridCell[] = [];
+  for (let i = 0; i < widthUnits; i++) {
+    for (let j = 0; j < depthUnits; j++) {
+      cells.push(
+        panel.orientation === 'h'
+          ? { x: panel.x + i, y: panel.y + j }
+          : { x: panel.x + j, y: panel.y + i },
+      );
+    }
+  }
+  return cells;
+}
+
+/** Depth of a flat-laid panel, in grid units. Five, for a 10 ft panel. */
+export const AREA_DEPTH_UNITS = WALL_HEIGHT_FT / GRID_FT;
+
+export function cellKey(cell: GridCell): string {
+  return `${cell.x},${cell.y}`;
 }
 
 export function edgeKey(edge: GridEdge): string {

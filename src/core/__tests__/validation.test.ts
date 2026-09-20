@@ -148,3 +148,69 @@ describe('isInsidePlot', () => {
     expect(isInsidePlot(plot, { id: 'a', category: 'wall', size: '2x10', x: 19, y: 0, orientation: 'h' })).toBe(true);
   });
 });
+
+/**
+ * Floor and roof sit on their own planes. The wall checks must not see them,
+ * and they must not see each other.
+ */
+describe('area categories', () => {
+  const bigPlot = rectPlotFromFt(60, 60);
+
+  function room20x20(): Panel[] {
+    const u = ftToUnits(20);
+    return [
+      ...tileRun(0, 0, u, 'h')!,
+      ...tileRun(0, u, u, 'h')!,
+      ...tileRun(0, 0, u, 'v')!,
+      ...tileRun(u, 0, u, 'v')!,
+    ];
+  }
+
+  /** One full-depth floor strip across a 20 ft span. */
+  function strip(category: 'floor' | 'roof', y = 0): Panel[] {
+    return [0, 2, 4, 6, 8].map((x, i) => ({
+      id: `${category}-${y}-${i}`,
+      category,
+      size: '4x10' as const,
+      x,
+      y,
+      orientation: 'h' as const,
+    }));
+  }
+
+  it('lets a floor and a roof share the same cells', () => {
+    const panels = [...room20x20(), ...strip('floor', 0), ...strip('floor', 5), ...strip('roof', 0), ...strip('roof', 5)];
+    const result = validatePlan(panels, bigPlot);
+    expect(result.errors).toEqual([]);
+    expect(result.manufacturable).toBe(true);
+  });
+
+  it('rejects two floor panels on the same cells', () => {
+    const panels = [...room20x20(), ...strip('floor', 0), ...strip('floor', 0)];
+    const result = validatePlan(panels, bigPlot);
+    expect(result.errors.some((e) => e.code === 'area-overlap')).toBe(true);
+  });
+
+  it('does not let a floor panel break the wall gap check', () => {
+    // Area panels produce no edges, so they must not appear as open ends.
+    const panels = [...room20x20(), ...strip('floor', 0)];
+    const result = validatePlan(panels, bigPlot);
+    expect(result.errors.filter((e) => e.code === 'open-end')).toEqual([]);
+  });
+
+  it('warns when a floor does not reach the whole building', () => {
+    const panels = [...room20x20(), ...strip('floor', 0)];
+    const result = validatePlan(panels, bigPlot);
+    const warning = result.warnings.find((w) => w.code === 'area-incomplete');
+    expect(warning).toBeDefined();
+    // Half the 400 sq ft room is still bare.
+    expect(warning!.message).toContain('200 sq ft');
+  });
+
+  it('rejects a floor panel that leaves the plot', () => {
+    const tiny = rectPlotFromFt(10, 10);
+    const stray: Panel = { id: 's', category: 'floor', size: '4x10', x: 8, y: 0, orientation: 'h' };
+    const result = validatePlan([...room20x20(), stray], tiny);
+    expect(result.errors.some((e) => e.code === 'area-outside-plot')).toBe(true);
+  });
+});

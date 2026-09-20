@@ -4,6 +4,7 @@ import type Konva from 'konva';
 import { GridLayer } from './GridLayer';
 import { PlotShape } from './PlotShape';
 import { PanelShape } from './PanelShape';
+import { AreaShape } from './AreaShape';
 import {
   BrushPreview,
   IssueMarkers,
@@ -18,6 +19,7 @@ import { isInsidePlot, wouldOverlap } from '../core/validation';
 import { newPanelId } from '../core/panels';
 import { detectJunctions } from '../core/junctions';
 import { useStore } from '../state/store';
+import { isLinearCategory } from '../core/types';
 import type { GridEdge, GridPoint, Panel, ValidationResult } from '../core/types';
 
 interface Props {
@@ -48,9 +50,25 @@ export function DesignCanvas({ validation, stageRef }: Props) {
   const notify = useStore((s) => s.notify);
   const openingBrush = useStore((s) => s.openingBrush);
   const setPanelCategory = useStore((s) => s.setPanelCategory);
+  const hiddenLayers = useStore((s) => s.hiddenLayers);
 
   const selectedIds = useMemo(() => new Set(selection), [selection]);
   const junctions = useMemo(() => detectJunctions(plan.panels), [plan.panels]);
+
+  // Hiding a layer only stops it drawing; the panels stay in the plan and in
+  // the BOM, because hiding is a view control, not an edit.
+  const visible = useMemo(
+    () => plan.panels.filter((panel) => !hiddenLayers.includes(panel.category)),
+    [plan.panels, hiddenLayers],
+  );
+  const areaPanels = useMemo(
+    () => visible.filter((panel) => !isLinearCategory(panel.category)),
+    [visible],
+  );
+  const linearPanels = useMemo(
+    () => visible.filter((panel) => isLinearCategory(panel.category)),
+    [visible],
+  );
 
   useLayoutEffect(() => {
     const element = containerRef.current;
@@ -213,11 +231,24 @@ export function DesignCanvas({ validation, stageRef }: Props) {
           <PlotShape plot={plan.plot} scale={viewport.scale} />
         </Layer>
 
+        {/* Floor and roof sit beneath the walls on their own plane. */}
+        <Layer listening={tool === 'select' && !openingBrush}>
+          {areaPanels.map((panel) => (
+            <AreaShape
+              key={panel.id}
+              panel={panel}
+              selected={selectedIds.has(panel.id)}
+              flagged={validation.flaggedPanelIds.has(panel.id)}
+              onSelect={(id, additive) => select([id], additive)}
+            />
+          ))}
+        </Layer>
+
         {/* Panels only take pointer events in select mode. While drawing, a
             click on an existing panel must fall through to the stage - a wall
             almost always starts at the corner where the last one ended. */}
         <Layer listening={tool === 'select'}>
-          {plan.panels.map((panel) => (
+          {linearPanels.map((panel) => (
             <PanelShape
               key={panel.id}
               panel={panel}
@@ -242,7 +273,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
 
         <Layer listening={false}>
           <JunctionMarkers junctions={junctions} scale={viewport.scale} />
-          <RunDimensions panels={plan.panels} scale={viewport.scale} />
+          <RunDimensions panels={linearPanels} scale={viewport.scale} />
           <IssueMarkers issues={validation.errors} scale={viewport.scale} />
           {tool === 'wall' && (
             <WallPreview
