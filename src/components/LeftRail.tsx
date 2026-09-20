@@ -13,9 +13,10 @@ import { Button, SectionTitle } from './ui';
 
 interface Props {
   onEditPlot(): void;
+  onEditUnderlay(): void;
 }
 
-export function LeftRail({ onEditPlot }: Props) {
+export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
   const tool = useStore((s) => s.tool);
   const setTool = useStore((s) => s.setTool);
   const brush = useStore((s) => s.brush);
@@ -37,6 +38,7 @@ export function LeftRail({ onEditPlot }: Props) {
   const clearArea = useStore((s) => s.clearArea);
   const hiddenLayers = useStore((s) => s.hiddenLayers);
   const toggleLayer = useStore((s) => s.toggleLayer);
+  const underlay = useStore((s) => s.plan.underlay);
 
   const countIn = (category: PanelCategory) =>
     panels.filter((p) => p.category === category).length;
@@ -266,8 +268,11 @@ export function LeftRail({ onEditPlot }: Props) {
           <Row label="Wall height" value={formatFt(WALL_HEIGHT_FT)} />
         </dl>
         {!readOnly && (
-          <div className="mt-2">
+          <div className="mt-2 flex flex-wrap gap-1.5">
             <Button onClick={onEditPlot}>Edit plot boundary</Button>
+            <Button onClick={onEditUnderlay}>
+              {underlay ? 'Underlay\u2026' : 'Trace a plan\u2026'}
+            </Button>
           </div>
         )}
       </section>

@@ -6,7 +6,9 @@ import { normalizePlot } from '../core/plot';
 import { tileRun } from '../core/tiling';
 import { bestTileFootprint } from '../core/areaTiling';
 import { interiorCells } from '../core/footprint';
+import { GRID_FT } from '../core/units';
 import type {
+  GridPoint,
   Orientation,
   Panel,
   PanelCategory,
@@ -14,6 +16,7 @@ import type {
   Plan,
   Plot,
   PriceConfig,
+  Underlay,
 } from '../core/types';
 import { loadPriceConfig, localPlanRepository, savePriceConfig } from './storage';
 import type { PlanSummary } from './storage';
@@ -54,6 +57,13 @@ export interface AppState {
   openingBrush: PanelCategory | null;
   /** Categories currently drawn. Hiding one never deletes its panels. */
   hiddenLayers: PanelCategory[];
+  /**
+   * Two-point scale calibration for the underlay. `from` is set by the first
+   * click; once `to` lands the dialog asks what that distance really is.
+   * Points are unsnapped world units - a scan does not line up with the grid,
+   * which is the whole reason it needs calibrating.
+   */
+  calibration: { active: boolean; from: GridPoint | null; to: GridPoint | null };
   selection: string[];
   /** First node clicked with the wall tool, if a run is in progress. */
   wallAnchor: { x: number; y: number } | null;
@@ -94,6 +104,12 @@ export interface AppState {
   setPlot(plot: Plot): void;
   setPlanName(name: string): void;
   setNotes(notes: string): void;
+  setUnderlay(underlay: Underlay | null): void;
+  updateUnderlay(patch: Partial<Underlay>): void;
+  startCalibration(): void;
+  cancelCalibration(): void;
+  setCalibrationPoint(point: GridPoint): void;
+  applyCalibration(realFeet: number): void;
 
   undo(): void;
   redo(): void;
@@ -145,6 +161,7 @@ export const useStore = create<AppState>()((set, get) => {
     activeCategory: 'wall',
     openingBrush: null,
     hiddenLayers: [],
+    calibration: { active: false, from: null, to: null },
     selection: [],
     wallAnchor: null,
     message: null,
@@ -387,6 +404,72 @@ export const useStore = create<AppState>()((set, get) => {
       set((state) => ({ plan: { ...state.plan, name }, dirty: true })),
 
     setNotes: (notes) => set((state) => ({ plan: { ...state.plan, notes }, dirty: true })),
+
+    setUnderlay: (underlay) =>
+      set((state) => {
+        const plan = { ...state.plan };
+        if (underlay) plan.underlay = underlay;
+        else delete plan.underlay;
+        return { plan, dirty: true };
+      }),
+
+    startCalibration: () =>
+      set({ calibration: { active: true, from: null, to: null }, tool: 'select', selection: [] }),
+
+    cancelCalibration: () => set({ calibration: { active: false, from: null, to: null } }),
+
+    setCalibrationPoint: (point) =>
+      set((state) => {
+        const { from } = state.calibration;
+        return from
+          ? { calibration: { ...state.calibration, to: point } }
+          : { calibration: { ...state.calibration, from: point, to: null } };
+      }),
+
+    /**
+     * Rescale the underlay so the calibrated span really is `realFeet` long.
+     *
+     * The first clicked point is held still, so the image grows or shrinks
+     * around the feature the architect was pointing at rather than jumping
+     * away from it.
+     */
+    applyCalibration: (realFeet) => {
+      const state = get();
+      const { from, to } = state.calibration;
+      const underlay = state.plan.underlay;
+      if (!from || !to || !underlay) return;
+
+      const spanUnits = Math.hypot(to.x - from.x, to.y - from.y);
+      if (!(spanUnits > 0) || !(realFeet > 0)) {
+        state.notify('Pick two different points and a positive distance.', 'error');
+        return;
+      }
+
+      const factor = realFeet / GRID_FT / spanUnits;
+      set({
+        plan: {
+          ...state.plan,
+          underlay: {
+            ...underlay,
+            scale: underlay.scale * factor,
+            x: from.x + (underlay.x - from.x) * factor,
+            y: from.y + (underlay.y - from.y) * factor,
+          },
+        },
+        calibration: { active: false, from: null, to: null },
+        dirty: true,
+      });
+      state.notify(`Underlay scaled so that span reads ${realFeet} ft.`);
+    },
+
+    updateUnderlay: (patch) =>
+      set((state) => {
+        if (!state.plan.underlay) return {};
+        return {
+          plan: { ...state.plan, underlay: { ...state.plan.underlay, ...patch } },
+          dirty: true,
+        };
+      }),
 
     undo: () => {
       const state = get();

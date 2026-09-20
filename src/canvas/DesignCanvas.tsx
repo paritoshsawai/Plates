@@ -5,6 +5,7 @@ import { GridLayer } from './GridLayer';
 import { PlotShape } from './PlotShape';
 import { PanelShape } from './PanelShape';
 import { AreaShape } from './AreaShape';
+import { CalibrationOverlay, UnderlayLayer } from './UnderlayLayer';
 import {
   BrushPreview,
   IssueMarkers,
@@ -12,7 +13,7 @@ import {
   RunDimensions,
   WallPreview,
 } from './Annotations';
-import { COLORS, fitToBox, nearestEdge, nearestNode, visibleUnits, zoomAt } from './view';
+import { COLORS, PX_PER_UNIT, fitToBox, nearestEdge, nearestNode, visibleUnits, zoomAt } from './view';
 import type { Viewport } from './view';
 import { plotBboxUnits } from '../core/plot';
 import { isInsidePlot, wouldOverlap } from '../core/validation';
@@ -33,6 +34,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
   const [viewport, setViewport] = useState<Viewport>({ scale: 1, x: 80, y: 80 });
   const [hoverNode, setHoverNode] = useState<GridPoint | null>(null);
   const [hoverEdge, setHoverEdge] = useState<GridEdge | null>(null);
+  const [hoverRaw, setHoverRaw] = useState<GridPoint | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
 
   const plan = useStore((s) => s.plan);
@@ -51,6 +53,8 @@ export function DesignCanvas({ validation, stageRef }: Props) {
   const openingBrush = useStore((s) => s.openingBrush);
   const setPanelCategory = useStore((s) => s.setPanelCategory);
   const hiddenLayers = useStore((s) => s.hiddenLayers);
+  const calibration = useStore((s) => s.calibration);
+  const setCalibrationPoint = useStore((s) => s.setCalibrationPoint);
 
   const selectedIds = useMemo(() => new Set(selection), [selection]);
   const junctions = useMemo(() => detectJunctions(plan.panels), [plan.panels]);
@@ -112,7 +116,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
     };
   }, []);
 
-  const panning = tool === 'select' || spaceHeld;
+  const panning = (tool === 'select' && !calibration.active) || spaceHeld;
 
   const readPointer = (stage: Konva.Stage) => {
     const point = stage.getRelativePointerPosition();
@@ -127,6 +131,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
     if (!point) return;
     setHoverNode(nearestNode(point.x, point.y));
     setHoverEdge(nearestEdge(point.x, point.y));
+    setHoverRaw({ x: point.x / PX_PER_UNIT, y: point.y / PX_PER_UNIT });
   };
 
   const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -134,6 +139,13 @@ export function DesignCanvas({ validation, stageRef }: Props) {
     if (!stage || e.target !== stage) return;
     const point = readPointer(stage);
     if (!point) return;
+
+    if (calibration.active) {
+      // Unsnapped: a scan does not line up with the grid, which is exactly why
+      // it needs calibrating in the first place.
+      setCalibrationPoint({ x: point.x / PX_PER_UNIT, y: point.y / PX_PER_UNIT });
+      return;
+    }
 
     if (tool === 'wall') {
       const node = nearestNode(point.x, point.y);
@@ -189,7 +201,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
     setViewport((current) => zoomAt(current, pointer, e.evt.deltaY));
   };
 
-  const cursor = openingBrush ? 'cell' : panning ? 'grab' : tool === 'wall' ? 'crosshair' : 'copy';
+  const cursor = calibration.active ? 'crosshair' : openingBrush ? 'cell' : panning ? 'grab' : tool === 'wall' ? 'crosshair' : 'copy';
 
   return (
     <div ref={containerRef} className="relative h-full w-full bg-white" style={{ cursor }}>
@@ -210,6 +222,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
         onMouseLeave={() => {
           setHoverNode(null);
           setHoverEdge(null);
+          setHoverRaw(null);
         }}
         onMouseDown={handleMouseDown}
         onWheel={handleWheel}
@@ -224,6 +237,9 @@ export function DesignCanvas({ validation, stageRef }: Props) {
             fill="#ffffff"
             listening={false}
           />
+          {/* The scan goes under the grid: it is something to trace, not part
+              of the drawing. */}
+          <UnderlayLayer underlay={plan.underlay} />
           <GridLayer
             bounds={visibleUnits(viewport, size.width, size.height)}
             scale={viewport.scale}
@@ -283,6 +299,11 @@ export function DesignCanvas({ validation, stageRef }: Props) {
               scale={viewport.scale}
             />
           )}
+          <CalibrationOverlay
+            from={calibration.active ? calibration.from : null}
+            cursor={calibration.active ? hoverRaw : null}
+            scale={viewport.scale}
+          />
           {tool === 'panel' && (
             <BrushPreview
               edge={hoverEdge}

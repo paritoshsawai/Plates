@@ -251,6 +251,27 @@ export interface ValidationResult {
   flaggedPanelIds: Set<string>;
 }
 
+/**
+ * A scanned plan or survey placed behind the grid to trace over.
+ *
+ * Position and scale are in grid units, so the underlay moves with the drawing
+ * rather than with the screen. `scale` is grid units per image pixel, derived
+ * once from a two-point calibration against a known real-world distance.
+ */
+export interface Underlay {
+  /** Data URL of the (downscaled) image. */
+  dataUrl: string;
+  /** Top-left corner, in grid units. */
+  x: number;
+  y: number;
+  /** Grid units per image pixel. */
+  scale: number;
+  /** 0..1; the image is a reference, never the drawing. */
+  opacity: number;
+  /** What the user named the file, for the UI. */
+  name: string;
+}
+
 export interface Plan {
   schemaVersion: number;
   id: string;
@@ -262,4 +283,6 @@ export interface Plan {
   /** Monotonic version number, bumped on each explicit save. */
   version: number;
   notes: string;
+  /** Optional scanned plan to trace over. */
+  underlay?: Underlay;
 }

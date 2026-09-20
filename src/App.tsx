@@ -8,6 +8,8 @@ import type { ExportActions } from './components/TopBar';
 import { PlansDialog } from './components/PlansDialog';
 import { PlotDialog } from './components/PlotDialog';
 import { PricingDialog } from './components/PricingDialog';
+import { UnderlayDialog } from './components/UnderlayDialog';
+import { CalibrationBanner } from './components/CalibrationBanner';
 import { buildBom } from './core/bom';
 import { serializePlan } from './core/plan';
 import { validatePlan } from './core/validation';
@@ -22,7 +24,7 @@ import {
 } from './export/download';
 import { useStore } from './state/store';
 
-type Dialog = 'plot' | 'pricing' | 'plans' | null;
+type Dialog = 'plot' | 'pricing' | 'plans' | 'underlay' | null;
 
 export default function App() {
   const stageRef = useRef<Konva.Stage | null>(null);
@@ -245,9 +247,15 @@ export default function App() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        {role !== 'client' && <LeftRail onEditPlot={() => setDialog('plot')} />}
-        <main className="order-first min-h-[55vh] min-w-0 flex-1 lg:order-none lg:min-h-0">
+        {role !== 'client' && (
+          <LeftRail
+            onEditPlot={() => setDialog('plot')}
+            onEditUnderlay={() => setDialog('underlay')}
+          />
+        )}
+        <main className="relative order-first min-h-[55vh] min-w-0 flex-1 lg:order-none lg:min-h-0">
           <DesignCanvas validation={validation} stageRef={stageRef} />
+          <CalibrationBanner />
         </main>
         <RightRail
           bom={bom}
@@ -259,6 +267,7 @@ export default function App() {
       {dialog === 'plot' && <PlotDialog onClose={() => setDialog(null)} />}
       {dialog === 'pricing' && <PricingDialog onClose={() => setDialog(null)} />}
       {dialog === 'plans' && <PlansDialog onClose={() => setDialog(null)} />}
+      {dialog === 'underlay' && <UnderlayDialog onClose={() => setDialog(null)} />}
 
       {message && (
         <div

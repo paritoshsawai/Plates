@@ -8,14 +8,15 @@
 import { isKnownCategory, isKnownPanelSize } from './panels';
 import { rectPlotFromFt } from './plot';
 import { isOpeningCategory } from './types';
-import type { Opening, Orientation, Panel, PanelCategory, Plan, Plot } from './types';
+import type { Opening, Orientation, Panel, PanelCategory, Plan, Plot, Underlay } from './types';
 
 /**
  * 1: wall panels only, size stored as `type`.
  * 2: panels carry a category, size stored as `size`.
  * 3: door and window panels carry an `opening` (swing, sill height).
+ * 4: an optional `underlay` image to trace over.
  */
-export const PLAN_SCHEMA_VERSION = 3;
+export const PLAN_SCHEMA_VERSION = 4;
 
 function newId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
@@ -62,6 +63,37 @@ function parseOpening(raw: unknown): Opening | undefined {
   const sill = Number(value.sillHeightFt);
   if (Number.isFinite(sill) && sill >= 0) opening.sillHeightFt = sill;
   return Object.keys(opening).length > 0 ? opening : undefined;
+}
+
+/**
+ * Parse an underlay, dropping it entirely if anything essential is missing or
+ * unusable. A half-valid underlay would render at the wrong scale, which is
+ * worse than no underlay at all.
+ */
+function parseUnderlay(raw: unknown): Underlay | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const value = raw as Record<string, unknown>;
+
+  const dataUrl = typeof value.dataUrl === 'string' ? value.dataUrl : '';
+  // Only inline images: a remote URL would not survive an export, and fetching
+  // one from a plan file is not something an import should ever do.
+  if (!dataUrl.startsWith('data:image/')) return undefined;
+
+  const scale = Number(value.scale);
+  if (!Number.isFinite(scale) || scale <= 0) return undefined;
+
+  const x = Number(value.x);
+  const y = Number(value.y);
+  const opacity = Number(value.opacity);
+
+  return {
+    dataUrl,
+    x: Number.isFinite(x) ? x : 0,
+    y: Number.isFinite(y) ? y : 0,
+    scale,
+    opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0.05, opacity)) : 0.5,
+    name: typeof value.name === 'string' ? value.name : 'Underlay',
+  };
 }
 
 function asInt(value: unknown, field: string): number {
@@ -146,9 +178,12 @@ export function parsePlan(raw: unknown): Plan {
     };
   });
 
+  const underlay = parseUnderlay(obj.underlay);
+
   const now = new Date().toISOString();
   return {
     schemaVersion: PLAN_SCHEMA_VERSION,
+    ...(underlay ? { underlay } : {}),
     id: typeof obj.id === 'string' && obj.id ? obj.id : newId('plan'),
     name: typeof obj.name === 'string' && obj.name ? obj.name : 'Imported plan',
     plot,
