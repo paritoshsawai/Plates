@@ -46,6 +46,8 @@ export function DesignCanvas({ validation, stageRef }: Props) {
   const select = useStore((s) => s.select);
   const clearSelection = useStore((s) => s.clearSelection);
   const notify = useStore((s) => s.notify);
+  const openingBrush = useStore((s) => s.openingBrush);
+  const setPanelCategory = useStore((s) => s.setPanelCategory);
 
   const selectedIds = useMemo(() => new Set(selection), [selection]);
   const junctions = useMemo(() => detectJunctions(plan.panels), [plan.panels]);
@@ -169,7 +171,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
     setViewport((current) => zoomAt(current, pointer, e.evt.deltaY));
   };
 
-  const cursor = panning ? 'grab' : tool === 'wall' ? 'crosshair' : 'copy';
+  const cursor = openingBrush ? 'cell' : panning ? 'grab' : tool === 'wall' ? 'crosshair' : 'copy';
 
   return (
     <div ref={containerRef} className="relative h-full w-full bg-white" style={{ cursor }}>
@@ -221,8 +223,18 @@ export function DesignCanvas({ validation, stageRef }: Props) {
               panel={panel}
               selected={selectedIds.has(panel.id)}
               flagged={validation.flaggedPanelIds.has(panel.id)}
-              draggable={tool === 'select'}
-              onSelect={(id, additive) => select([id], additive)}
+              draggable={tool === 'select' && !openingBrush}
+              onSelect={(id, additive) => {
+                if (!openingBrush) {
+                  select([id], additive);
+                  return;
+                }
+                // With an opening brush armed, clicking converts rather than
+                // selects - and clicking an opening of the same type again
+                // turns it back into a wall, so one control does both.
+                const current = plan.panels.find((p) => p.id === id);
+                setPanelCategory(id, current?.category === openingBrush ? 'wall' : openingBrush);
+              }}
               onMoved={movePanel}
             />
           ))}

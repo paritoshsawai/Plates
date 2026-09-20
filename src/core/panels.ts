@@ -55,8 +55,15 @@ export const CONNECTOR_STYLE: Record<ConnectorType, { label: string; plural: str
   cross: { label: 'Cross connector', plural: 'Cross connectors' },
 };
 
-/** Categories the architect can place today. Floor and roof arrive in Phase 3. */
+/** Categories the architect can draw runs in. Floor and roof arrive in Phase 3. */
 export const PLACEABLE_CATEGORIES: readonly PanelCategory[] = ['wall'];
+
+/**
+ * Categories applied by converting an existing panel rather than by drawing.
+ * Arplace pre-cuts openings into a panel at the factory, so a door *is* the
+ * panel occupying that slot.
+ */
+export const OPENING_CATEGORIES: readonly PanelCategory[] = ['door', 'window'];
 
 export function categoryColor(category: PanelCategory): string {
   return CATEGORY_STYLE[category]?.color ?? CATEGORY_STYLE.wall.color;

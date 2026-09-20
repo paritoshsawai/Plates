@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { createPlan, deserializePlan } from '../core/plan';
 import { flipOrientation, getPanelSpec, newPanelId } from '../core/panels';
+import { isOpeningCategory } from '../core/types';
 import { normalizePlot } from '../core/plot';
 import { tileRun } from '../core/tiling';
 import type {
@@ -44,6 +45,11 @@ export interface AppState {
   brushOrientation: Orientation;
   /** The category new panels are created in, and the layer editing targets. */
   activeCategory: PanelCategory;
+  /**
+   * When set, clicking a panel converts it to this category instead of
+   * selecting it. Null means the normal select behaviour.
+   */
+  openingBrush: PanelCategory | null;
   selection: string[];
   /** First node clicked with the wall tool, if a run is in progress. */
   wallAnchor: { x: number; y: number } | null;
@@ -58,6 +64,7 @@ export interface AppState {
   setTool(tool: Tool): void;
   setBrush(size: PanelSizeId): void;
   setActiveCategory(category: PanelCategory): void;
+  setOpeningBrush(category: PanelCategory | null): void;
   rotateBrush(): void;
   setWallAnchor(node: { x: number; y: number } | null): void;
   notify(text: string, tone?: 'info' | 'error'): void;
@@ -69,6 +76,8 @@ export interface AppState {
 
   addPanels(panels: Panel[]): void;
   placeBrush(x: number, y: number, orientation: Orientation): void;
+  setPanelCategory(id: string, category: PanelCategory): void;
+  splitPanel(id: string): void;
   autoFillRun(from: { x: number; y: number }, to: { x: number; y: number }): void;
   movePanel(id: string, x: number, y: number): void;
   rotateSelection(): void;
@@ -127,6 +136,7 @@ export const useStore = create<AppState>()((set, get) => {
     brush: '4x10',
     brushOrientation: 'h',
     activeCategory: 'wall',
+    openingBrush: null,
     selection: [],
     wallAnchor: null,
     message: null,
@@ -139,9 +149,21 @@ export const useStore = create<AppState>()((set, get) => {
       // A client may look but not edit, so drop them onto the read-only tool.
       set({ role, tool: role === 'client' ? 'select' : get().tool, selection: [], wallAnchor: null }),
 
-    setTool: (tool) => set({ tool, wallAnchor: null, selection: tool === 'select' ? get().selection : [] }),
+    setTool: (tool) =>
+      set({
+        tool,
+        wallAnchor: null,
+        openingBrush: tool === 'select' ? get().openingBrush : null,
+        selection: tool === 'select' ? get().selection : [],
+      }),
     setBrush: (brush) => set({ brush }),
-    setActiveCategory: (activeCategory) => set({ activeCategory, selection: [], wallAnchor: null }),
+    setActiveCategory: (activeCategory) =>
+      set({ activeCategory, openingBrush: null, selection: [], wallAnchor: null }),
+
+    // Converting needs the select tool's hit-testing, so switching on an
+    // opening brush also switches to it.
+    setOpeningBrush: (openingBrush) =>
+      set({ openingBrush, tool: openingBrush ? 'select' : get().tool, selection: [] }),
     rotateBrush: () => set({ brushOrientation: flipOrientation(get().brushOrientation) }),
     setWallAnchor: (wallAnchor) => set({ wallAnchor }),
     notify: (text, tone = 'info') => set({ message: { text, tone } }),
@@ -177,6 +199,60 @@ export const useStore = create<AppState>()((set, get) => {
       };
       commit((doc) => ({ ...doc, panels: [...doc.panels, panel] }));
     },
+
+    /**
+     * Turn an existing panel into another category in place, keeping its size,
+     * position and orientation.
+     *
+     * Openings are conversions rather than insertions: Arplace pre-cuts them
+     * into a panel at the factory, so a door *is* the panel in that slot. Doing
+     * it in place also means the sizes always match by construction, so there
+     * is no "2 ft door on a 4 ft panel" mismatch to refuse.
+     */
+    setPanelCategory: (id, category) =>
+      commit((doc) => {
+        const index = doc.panels.findIndex((p) => p.id === id);
+        if (index < 0) return null;
+        const existing = doc.panels[index];
+        if (existing.category === category) return null;
+
+        const panels = [...doc.panels];
+        const next: Panel = { ...existing, category };
+        // Swing and sill are meaningless on a wall, so drop them on the way out
+        // rather than leaving stale detail on the panel.
+        if (isOpeningCategory(category)) next.opening = existing.opening ?? {};
+        else delete next.opening;
+        panels[index] = next;
+        return { ...doc, panels };
+      }),
+
+    /**
+     * Replace one 4 ft panel with two 2 ft panels covering the same edges.
+     *
+     * Without this a 2 ft opening is often impossible to place: the run was
+     * auto-tiled with 4 ft panels, and an opening can only take the size of the
+     * panel it replaces.
+     */
+    splitPanel: (id) =>
+      commit((doc) => {
+        const index = doc.panels.findIndex((p) => p.id === id);
+        if (index < 0) return null;
+        const existing = doc.panels[index];
+        const halfUnits = getPanelSpec('2x10').widthUnits;
+        if (getPanelSpec(existing.size).widthUnits <= halfUnits) return null;
+
+        const halves: Panel[] = [0, 1].map((n) => ({
+          ...existing,
+          id: newPanelId(),
+          size: '2x10',
+          x: existing.orientation === 'h' ? existing.x + n * halfUnits : existing.x,
+          y: existing.orientation === 'h' ? existing.y : existing.y + n * halfUnits,
+        }));
+
+        const panels = [...doc.panels];
+        panels.splice(index, 1, ...halves);
+        return { ...doc, panels };
+      }),
 
     autoFillRun: (from, to) => {
       const dx = to.x - from.x;

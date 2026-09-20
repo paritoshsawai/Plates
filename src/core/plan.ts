@@ -7,13 +7,15 @@
 
 import { isKnownCategory, isKnownPanelSize } from './panels';
 import { rectPlotFromFt } from './plot';
-import type { Orientation, Panel, PanelCategory, Plan, Plot } from './types';
+import { isOpeningCategory } from './types';
+import type { Opening, Orientation, Panel, PanelCategory, Plan, Plot } from './types';
 
 /**
  * 1: wall panels only, size stored as `type`.
  * 2: panels carry a category, size stored as `size`.
+ * 3: door and window panels carry an `opening` (swing, sill height).
  */
-export const PLAN_SCHEMA_VERSION = 2;
+export const PLAN_SCHEMA_VERSION = 3;
 
 function newId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
@@ -46,6 +48,20 @@ function asOrientation(value: unknown): Orientation {
   if (value === 0 || value === '0') return 'h';
   if (value === 90 || value === '90') return 'v';
   throw new PlanParseError(`Invalid panel orientation: ${String(value)}`);
+}
+
+/**
+ * Openings from schema 2 and earlier have no detail at all, and a hand-edited
+ * plan can carry anything, so unusable values are dropped rather than trusted.
+ */
+function parseOpening(raw: unknown): Opening | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const value = raw as Record<string, unknown>;
+  const opening: Opening = {};
+  if (value.swing === 'left' || value.swing === 'right') opening.swing = value.swing;
+  const sill = Number(value.sillHeightFt);
+  if (Number.isFinite(sill) && sill >= 0) opening.sillHeightFt = sill;
+  return Object.keys(opening).length > 0 ? opening : undefined;
 }
 
 function asInt(value: unknown, field: string): number {
@@ -117,6 +133,8 @@ export function parsePlan(raw: unknown): Plan {
     const id = typeof panel.id === 'string' && panel.id ? panel.id : newId('p');
     if (seenIds.has(id)) throw new PlanParseError(`Duplicate panel id "${id}".`);
     seenIds.add(id);
+    const opening = isOpeningCategory(category) ? parseOpening(panel.opening) : undefined;
+
     return {
       id,
       category,
@@ -124,6 +142,7 @@ export function parsePlan(raw: unknown): Plan {
       x: asInt(panel.x, `panels[${i}].x`),
       y: asInt(panel.y, `panels[${i}].y`),
       orientation: asOrientation(panel.orientation ?? panel.rotation),
+      ...(opening ? { opening } : {}),
     };
   });
 

@@ -1,4 +1,9 @@
-import { CATEGORY_STYLE, PANEL_CATALOG, PLACEABLE_CATEGORIES } from '../core/panels';
+import {
+  CATEGORY_STYLE,
+  OPENING_CATEGORIES,
+  PANEL_CATALOG,
+  PLACEABLE_CATEGORIES,
+} from '../core/panels';
 import { GRID_FT, WALL_HEIGHT_FT, formatFt } from '../core/units';
 import { plotAreaSqFt, plotEdgeLengthsFt } from '../core/plot';
 import { useStore } from '../state/store';
@@ -21,6 +26,16 @@ export function LeftRail({ onEditPlot }: Props) {
   const rotateSelection = useStore((s) => s.rotateSelection);
   const duplicateSelection = useStore((s) => s.duplicateSelection);
   const deleteSelection = useStore((s) => s.deleteSelection);
+  const openingBrush = useStore((s) => s.openingBrush);
+  const setOpeningBrush = useStore((s) => s.setOpeningBrush);
+  const selection = useStore((s) => s.selection);
+  const panels = useStore((s) => s.plan.panels);
+  const splitPanel = useStore((s) => s.splitPanel);
+
+  // Splitting only means anything for a 4 ft panel.
+  const splittable = selection.filter(
+    (id) => panels.find((p) => p.id === id)?.size === '4x10',
+  );
 
   const readOnly = role === 'client';
   const edges = plotEdgeLengthsFt(plot);
@@ -116,6 +131,52 @@ export function LeftRail({ onEditPlot }: Props) {
           common divisor of the two widths.
         </p>
       </section>
+
+      {!readOnly && (
+        <section>
+          <SectionTitle>Openings</SectionTitle>
+          <div className="grid gap-1.5">
+            {OPENING_CATEGORIES.map((category) => (
+              <button
+                key={category}
+                type="button"
+                onClick={() => setOpeningBrush(openingBrush === category ? null : category)}
+                className={`flex items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition ${
+                  openingBrush === category
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <span
+                  className="h-3 w-3 shrink-0 rounded-sm border-2"
+                  style={{ borderColor: CATEGORY_STYLE[category].color }}
+                />
+                <span className="text-sm text-slate-700">{CATEGORY_STYLE[category].label}</span>
+              </button>
+            ))}
+            {openingBrush && (
+              <Button variant="ghost" onClick={() => setOpeningBrush(null)}>
+                Done
+              </Button>
+            )}
+          </div>
+          <p className="mt-2 text-xs leading-snug text-slate-500">
+            {openingBrush
+              ? `Click a panel to turn it into a ${CATEGORY_STYLE[openingBrush].label.toLowerCase()}. Click it again with the same tool to change it back.`
+              : 'Openings are pre-cut at the factory, so one replaces a whole panel. Pick a type, then click the panel it goes in.'}
+          </p>
+          {splittable.length > 0 && (
+            <div className="mt-2">
+              <Button onClick={() => splittable.forEach(splitPanel)}>
+                Split into 2 ft panels
+              </Button>
+              <p className="mt-1 text-xs leading-snug text-slate-500">
+                A 2 ft opening needs a 2 ft panel to sit in.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
 
       {!readOnly && (
         <section>

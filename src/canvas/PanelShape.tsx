@@ -1,7 +1,8 @@
 import { useCallback } from 'react';
-import { Group, Rect } from 'react-konva';
+import { Arc, Group, Line, Rect } from 'react-konva';
 import type Konva from 'konva';
 import { categoryColor, getPanelSpec } from '../core/panels';
+import { isOpeningCategory } from '../core/types';
 import type { Panel } from '../core/types';
 import { COLORS, PX_PER_UNIT, WALL_PX } from './view';
 
@@ -45,6 +46,7 @@ export function PanelShape({ panel, selected, flagged, draggable, onSelect, onMo
   );
 
   const fill = flagged ? COLORS.error : categoryColor(panel.category);
+  const opening = isOpeningCategory(panel.category);
 
   return (
     <Group
@@ -77,15 +79,105 @@ export function PanelShape({ panel, selected, flagged, draggable, onSelect, onMo
         y={-offsetY}
         width={width}
         height={height}
-        fill={fill}
-        stroke={selected ? COLORS.selection : '#ffffff'}
-        strokeWidth={selected ? 2.5 : 1}
+        // An opening is drawn hollow: standard plan drafting breaks the wall
+        // at a door or window rather than filling it solid.
+        fill={opening ? '#ffffff' : fill}
+        stroke={selected ? COLORS.selection : opening ? fill : '#ffffff'}
+        strokeWidth={selected ? 2.5 : opening ? 1.5 : 1}
         cornerRadius={1.5}
         shadowColor={selected ? COLORS.selection : undefined}
         shadowBlur={selected ? 8 : 0}
         shadowOpacity={selected ? 0.5 : 0}
         perfectDrawEnabled={false}
       />
+      {panel.category === 'window' && (
+        <WindowSymbol runPx={runPx} orientation={panel.orientation} color={fill} />
+      )}
+      {panel.category === 'door' && (
+        <DoorSymbol runPx={runPx} orientation={panel.orientation} color={fill} swing={panel.opening?.swing} />
+      )}
     </Group>
+  );
+}
+
+/** A window reads as a double line running the length of the opening. */
+function WindowSymbol({
+  runPx,
+  orientation,
+  color,
+}: {
+  runPx: number;
+  orientation: Panel['orientation'];
+  color: string;
+}) {
+  const gap = WALL_PX / 4;
+  return (
+    <>
+      {[-gap, gap].map((offset, i) => (
+        <Line
+          key={i}
+          points={
+            orientation === 'h'
+              ? [0, offset, runPx, offset]
+              : [offset, 0, offset, runPx]
+          }
+          stroke={color}
+          strokeWidth={1.25}
+          listening={false}
+        />
+      ))}
+    </>
+  );
+}
+
+/**
+ * A door reads as a quarter-circle swing arc struck from one jamb, the
+ * convention on any floor plan. `swing` picks the hinge; it defaults to the
+ * panel's start jamb.
+ */
+function DoorSymbol({
+  runPx,
+  orientation,
+  color,
+  swing,
+}: {
+  runPx: number;
+  orientation: Panel['orientation'];
+  color: string;
+  swing?: 'left' | 'right';
+}) {
+  const hingeAtEnd = swing === 'right';
+  const hinge = hingeAtEnd ? runPx : 0;
+
+  // Konva sweeps an Arc clockwise from `rotation`, where 0 points along +x.
+  // Each case starts the sweep along the wall (away from the hinge) and ends
+  // it perpendicular on the +y side for a horizontal wall, +x for a vertical
+  // one - so the leaf below always points the same way as the arc ends.
+  const rotation = orientation === 'h' ? (hingeAtEnd ? 90 : 0) : hingeAtEnd ? 270 : 0;
+
+  return (
+    <>
+      <Arc
+        x={orientation === 'h' ? hinge : 0}
+        y={orientation === 'h' ? 0 : hinge}
+        innerRadius={0}
+        outerRadius={runPx}
+        angle={90}
+        rotation={rotation}
+        stroke={color}
+        strokeWidth={1}
+        dash={[3, 2]}
+        listening={false}
+      />
+      <Line
+        // The open leaf: perpendicular to the wall, one panel-width long.
+        points={
+          orientation === 'h' ? [hinge, 0, hinge, runPx] : [0, hinge, runPx, hinge]
+        }
+        stroke={color}
+        strokeWidth={1.5}
+        listening={false}
+      />
+    </>
   );
 }

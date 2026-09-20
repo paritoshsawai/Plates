@@ -65,6 +65,25 @@ export interface Panel {
   x: number;
   y: number;
   orientation: Orientation;
+  /** Set on door and window panels; ignored on every other category. */
+  opening?: Opening;
+}
+
+/**
+ * Detail carried by a pre-cut opening. Arplace's factory cuts these into the
+ * panel before delivery, so the swing and sill travel with the panel rather
+ * than being decided on site.
+ */
+export interface Opening {
+  /** Which jamb the door is hinged on, seen along the panel's run direction. */
+  swing?: 'left' | 'right';
+  /** Height of a window's sill above the floor, in feet. */
+  sillHeightFt?: number;
+}
+
+/** Categories that carry an Opening. */
+export function isOpeningCategory(category: PanelCategory): boolean {
+  return category === 'door' || category === 'window';
 }
 
 /** A node of the modular grid, in integer grid units. */

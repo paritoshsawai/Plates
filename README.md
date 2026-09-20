@@ -11,7 +11,7 @@ length is a multiple of 2 ft tiles exactly with zero offcut, and nothing else ca
 ```bash
 npm install
 npm run dev       # http://localhost:5173
-npm test          # 98 unit tests over the geometry, tiling, BOM and pricing
+npm test          # 148 unit tests over the geometry, tiling, BOM, pricing and store
 npm run build     # typecheck + production bundle
 ```
 
@@ -126,7 +126,7 @@ exports round-trip back through Import.
 
 These are the spec's Phase-2 items, deliberately deferred:
 
-- Doors and windows, multi-storey stacking
+- Multi-storey stacking
 - DXF/CAD export and a dedicated factory view (Konva cannot emit DXF; this needs Maker.js or
   dxf-writer)
 - A server, real authentication, and the ERP/webhook integration — `toWorkOrder()` produces the

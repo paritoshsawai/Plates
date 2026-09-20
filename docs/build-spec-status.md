@@ -32,12 +32,38 @@ satisfies the item.
 - **Roles ship as a UI switch only.** Real access control needs the server that is Phase 2.
   Labelled as such in the code and the README so nobody mistakes it for enforcement.
 
-## Phase 2 (spec §5) — not built
+## Extension spec
 
-Doors and windows · multi-storey stacking · DXF export and factory view · branded client-shareable
-quote links · ERP/webhook integration · whole-plan optimisation pass · survey-image tracing and
-GeoJSON/KML import · structural and load validation · wall thickness and interior/exterior typing ·
-collaboration and comments.
+| § | Feature | Status |
+| --- | --- | --- |
+| 1 | Panel categories, category×size pricing, grouped BOM | **Done** |
+| 3 | Corner / T / cross connector auto-detection | **Done** |
+| 2 | Doors and windows | **Done** |
+| 1 | Floor and roof panels (10 ft strip tiling) | Not built |
+| 4 | Image / PDF trace-over | Not built |
+| 5 | 3D view | Not built |
+
+### Extension deviations
+
+- **§1 floor/roof cannot reuse the 1D coin change.** A floor `4x10` lies flat as a 4 ft × 10 ft
+  rectangle (2 × 5 grid units), so both sizes are 5 units in one direction and the footprint only
+  tiles exactly when its depth is a multiple of 10 ft. They will lay in 10 ft strips, with the
+  existing 1D tiling picking widths within each strip.
+- **§3 degree-1 open ends stay a blocking error**, not a warning. A hole in a wall must not read as
+  manufacturable.
+- **§2 openings are conversions, not insertions.** A door replaces a wall panel in place, keeping
+  its size, position and orientation — which is how the factory pre-cuts them, and which removes
+  the size-mismatch case entirely. A "split into 2 ft panels" action exists so a 2 ft opening can
+  be placed in a run that was auto-tiled with 4 ft panels.
+- **§5 will not use CSG.** Openings occupy whole discrete panel slots, so a door is simply not a
+  wall mesh at that slot. That drops a WASM dependency and buys nothing.
+
+## Still not built
+
+Multi-storey stacking · DXF export and factory view · branded client-shareable quote links ·
+ERP/webhook integration · whole-plan optimisation pass · ML floor-plan recognition · GeoJSON/KML
+import · structural and load validation · wall thickness and interior/exterior typing ·
+collaboration and comments · roof pitch.
 
 `toWorkOrder()` already emits the ERP payload, so that integration is a transport problem, not a
 modelling one.
@@ -49,7 +75,8 @@ modelling one.
 | Grid alignment between the two panels | Both tile the same 2 ft module by construction; off-grid coordinates are rejected at import |
 | Orientation | 90° only; the 10 ft dimension is wall height and never appears in plan |
 | Non-modular plot dimension | Warned in the plot dialog with the nearest buildable lengths above and below |
-| Corners and junctions | Panels own edges, junctions are dimensionless nodes — no double-counting |
+| Corners and junctions | Auto-detected and separately priced. Panels own edges, connectors own nodes, so nothing is counted twice |
+| Door/window grid width | Grid-aligned 2 ft and 4 ft SKUs (§2 option (a)). **Arplace must confirm their real widths** — §6 calls this their decision |
 | Wall thickness, interior vs exterior | MVP models the centreline with no thickness; Phase 2 |
 | Shared party walls | One set of panels covers a shared wall; a second set on the same edges is an overlap error (tested) |
 | Pricing correctness | Never hard-coded; dated schedule, effective date on every quote |
@@ -57,7 +84,7 @@ modelling one.
 
 ## Test coverage
 
-98 unit tests across `core/` and `canvas/view.ts`, plus a Playwright drive of the built app that
+148 unit tests across `core/`, `state/` and `canvas/view.ts`, plus a Playwright drive of the built app that
 exercises drawing, selection, deletion, undo, the placement guards, pricing, all five exports, save
 and reopen, and the read-only client view. Drawing a 20 × 16 ft room in the browser produces the
 same 18 panels / 72 linear ft the unit tests assert.
