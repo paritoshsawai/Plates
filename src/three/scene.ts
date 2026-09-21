@@ -93,6 +93,14 @@ function buildWall(group: THREE.Group, panel: Panel, pickMap: Map<THREE.Object3D
 /**
  * A door: the header above the opening, and nothing where the door is. The
  * opening is a whole panel slot, so leaving the gap needs no subtraction.
+ *
+ * The empty slot still gets an invisible box, because the doorway is where
+ * anyone would click to select the door or turn it back into a wall. Without
+ * it the click sails through the opening and lands on whatever stands behind,
+ * so clicking "the door" a second time converted the *far* wall instead of
+ * reverting this one. Zero opacity rather than `visible: false`, since the
+ * raycaster must still see it, and no depth write so it cannot tint anything
+ * drawn behind it.
  */
 function buildDoor(group: THREE.Group, panel: Panel, pickMap: Map<THREE.Object3D, string>): void {
   const span = linearSpan(panel);
@@ -104,6 +112,14 @@ function buildDoor(group: THREE.Group, panel: Panel, pickMap: Map<THREE.Object3D
     { x: span.centreX, y: DOOR_HEAD_FT + headerHeight / 2, z: span.centreZ },
   );
   pickMap.set(mesh, panel.id);
+
+  const slot = addBox(
+    group,
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+    { x: span.sizeX, y: DOOR_HEAD_FT, z: span.sizeZ },
+    { x: span.centreX, y: DOOR_HEAD_FT / 2, z: span.centreZ },
+  );
+  pickMap.set(slot, panel.id);
 }
 
 /** A window: sill below, header above, glass between. */
@@ -134,12 +150,15 @@ function buildWindow(group: THREE.Group, panel: Panel, pickMap: Map<THREE.Object
     transparent: true,
     opacity: 0.35,
   });
-  addBox(
+  // The glass is pickable too. It is the obvious place to click a window, and
+  // leaving it out of the map made the middle of every window select nothing.
+  const pane = addBox(
     group,
     glass,
     { x: span.sizeX * 0.9, y: glassHeight, z: span.sizeZ * 0.9 },
     { x: span.centreX, y: WINDOW_SILL_FT + glassHeight / 2, z: span.centreZ },
   );
+  pickMap.set(pane, panel.id);
 }
 
 /** A floor or roof panel: a flat slab covering the cells it owns. */

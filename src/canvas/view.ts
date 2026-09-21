@@ -126,3 +126,22 @@ export function fitToBox(
     y: (height - boxH * scale) / 2 - box.minY * PX_PER_UNIT * scale,
   };
 }
+
+/**
+ * Live-snap a Konva drag to the 2 ft grid.
+ *
+ * Konva hands the handler absolute stage coordinates, so the transform has to
+ * be undone, the position snapped in world space, and the transform reapplied.
+ * Written as a standalone function because it is bound as a `dragBoundFunc`,
+ * where `this` is the node being dragged.
+ */
+export function snapToGrid(this: { getStage(): { scaleX(): number; x(): number; y(): number } | null }, pos: { x: number; y: number }): { x: number; y: number } {
+  const stage = this.getStage();
+  if (!stage) return pos;
+  const scale = stage.scaleX() || 1;
+  const originX = stage.x();
+  const originY = stage.y();
+  const snap = (screen: number, origin: number) =>
+    Math.round((screen - origin) / scale / PX_PER_UNIT) * PX_PER_UNIT * scale + origin;
+  return { x: snap(pos.x, originX), y: snap(pos.y, originY) };
+}

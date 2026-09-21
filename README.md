@@ -11,7 +11,7 @@ length is a multiple of 2 ft tiles exactly with zero offcut, and nothing else ca
 ```bash
 npm install
 npm run dev       # http://localhost:5173
-npm test          # 266 unit tests over the geometry, tiling, BOM, pricing, store and 3D
+npm test          # 289 unit tests over the geometry, tiling, BOM, pricing, store and 3D
 npm run build     # typecheck + production bundle
 npm run stage:artifact   # stage dist/ for publishing, with an asset-reference check
 ```
@@ -31,7 +31,9 @@ npm run stage:artifact   # stage dist/ for publishing, with an asset-reference c
    live. The plan reads *Manufacturable ✓* only when every error is gone.
 5. **Read the BOM and cost.** Panel counts, line items, totals and material utilisation update on
    every edit, priced from an admin-editable schedule.
-6. **Export.** Quote PDF, plan PNG, BOM CSV, plan JSON, and a work-order JSON payload shaped for an
+6. **Work in 3D too.** The 3D tab is not read-only: arm Door or Window and click a wall to convert
+   it in place, exactly as in the plan, and click it again to turn it back.
+7. **Export.** Quote PDF, plan PNG, BOM CSV, plan JSON, and a work-order JSON payload shaped for an
    ERP.
 
 ## The model
@@ -67,6 +69,11 @@ categories occupy grid **cells** rather than edges. They are laid in 10 ft strip
 tiling above picking the 4 ft and 2 ft widths along each strip. The building interior comes from a
 flood fill starting *outside* the wall bounding box — the walls are a graph, not a closed ring, so
 a fill handles any shape and ignores interior partitions for free.
+
+Fill picks whichever strip direction covers more of the building; the arrows beside it re-lay the
+whole floor or roof the other way, for when a joist run or a slope decides the direction rather
+than the panel count. Individual floor and roof panels can be dragged too, and an area drop is
+refused if it would bury a neighbour or leave the plot.
 
 The consequence is worth stating plainly: **a building no axis of which divides by 10 ft cannot be
 fully floored.** Once a floor or roof exists, anything it cannot reach is a blocking error with the

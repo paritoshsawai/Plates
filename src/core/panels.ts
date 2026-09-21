@@ -1,5 +1,5 @@
 import { GRID_FT, WALL_HEIGHT_FT } from './units';
-import { isLinearCategory } from './types';
+import { isLinearCategory, isOpeningCategory } from './types';
 import type {
   ConnectorType,
   GridCell,
@@ -229,4 +229,30 @@ let idCounter = 0;
 export function newPanelId(): string {
   idCounter += 1;
   return `p${Date.now().toString(36)}${idCounter.toString(36)}`;
+}
+
+/**
+ * What a click on `panel` should do while `brush` is armed.
+ *
+ * Returns the category to convert the panel to, or `null` to mean "this is not
+ * a conversion" - either because no brush is armed, or because the panel is not
+ * something an opening can be cut into.
+ *
+ * Both views route their clicks through this. The plan view can lean on layer
+ * hit-testing to keep an armed brush away from floors and roofs, but the 3D
+ * scene is one flat group with no layers, so the rule has to live somewhere
+ * both can share rather than being re-derived per view. An opening is a
+ * pre-cut *wall* panel, so an area panel is never a target: without this guard
+ * a door brush clicking a floor slab would turn the floor into a door.
+ */
+export function resolveOpeningClick(
+  panel: Panel | undefined,
+  brush: PanelCategory | null,
+): PanelCategory | null {
+  if (!panel || !brush) return null;
+  if (!isOpeningCategory(brush)) return null;
+  if (!isLinearCategory(panel.category)) return null;
+  // Clicking an opening with its own tool takes it back to a plain wall, so one
+  // control both applies and undoes.
+  return panel.category === brush ? 'wall' : brush;
 }

@@ -19,7 +19,7 @@ import { COLORS, PX_PER_UNIT, fitToBox, nearestEdge, nearestNode, visibleUnits, 
 import type { Viewport } from './view';
 import { plotBboxUnits } from '../core/plot';
 import { isInsidePlot, wouldOverlap } from '../core/validation';
-import { newPanelId, panelBoundsUnits, rectsIntersect } from '../core/panels';
+import { newPanelId, panelBoundsUnits, rectsIntersect, resolveOpeningClick } from '../core/panels';
 import { detectJunctions } from '../core/junctions';
 import { useStore } from '../state/store';
 import { isLinearCategory } from '../core/types';
@@ -385,7 +385,9 @@ export function DesignCanvas({ validation, stageRef }: Props) {
               panel={panel}
               selected={selectedIds.has(panel.id)}
               flagged={validation.flaggedPanelIds.has(panel.id)}
+              draggable={tool === 'select' && !openingBrush}
               onSelect={(id, additive) => select([id], additive)}
+              onMoved={movePanel}
             />
           ))}
         </Layer>
@@ -402,15 +404,13 @@ export function DesignCanvas({ validation, stageRef }: Props) {
               flagged={validation.flaggedPanelIds.has(panel.id)}
               draggable={tool === 'select' && !openingBrush}
               onSelect={(id, additive) => {
-                if (!openingBrush) {
-                  select([id], additive);
-                  return;
-                }
                 // With an opening brush armed, clicking converts rather than
-                // selects - and clicking an opening of the same type again
-                // turns it back into a wall, so one control does both.
+                // selects. The rule lives in resolveOpeningClick so the 3D view
+                // applies exactly the same one.
                 const current = plan.panels.find((p) => p.id === id);
-                setPanelCategory(id, current?.category === openingBrush ? 'wall' : openingBrush);
+                const converted = resolveOpeningClick(current, openingBrush);
+                if (converted) setPanelCategory(id, converted);
+                else select([id], additive);
               }}
               onMoved={movePanel}
             />

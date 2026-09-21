@@ -1,11 +1,11 @@
 import { create } from 'zustand';
 import { createPlan, deserializePlan } from '../core/plan';
 import { flipOrientation, getPanelSpec, newPanelId } from '../core/panels';
-import { isOpeningCategory } from '../core/types';
+import { isLinearCategory, isOpeningCategory } from '../core/types';
 import { normalizePlot } from '../core/plot';
 import { canPlace } from '../core/validation';
 import { tileRun } from '../core/tiling';
-import { bestTileFootprint } from '../core/areaTiling';
+import { bestTileFootprint, tileFootprint } from '../core/areaTiling';
 import { interiorCells } from '../core/footprint';
 import { GRID_FT } from '../core/units';
 import type {
@@ -59,6 +59,11 @@ export interface AppState {
   /** Categories currently drawn. Hiding one never deletes its panels. */
   hiddenLayers: PanelCategory[];
   /**
+   * Which way each area category's 10 ft strips run. Absent means the next fill
+   * chooses for itself; a fill always writes back what it actually used.
+   */
+  areaAxis: Partial<Record<PanelCategory, Orientation>>;
+  /**
    * Two-point scale calibration for the underlay. `from` is set by the first
    * click; once `to` lands the dialog asks what that distance really is.
    * Points are unsnapped world units - a scan does not line up with the grid,
@@ -93,7 +98,8 @@ export interface AppState {
   placeBrush(x: number, y: number, orientation: Orientation): void;
   setPanelCategory(id: string, category: PanelCategory): void;
   splitPanel(id: string): void;
-  fillArea(category: PanelCategory): void;
+  fillArea(category: PanelCategory, orientation?: Orientation): void;
+  setAreaAxis(category: PanelCategory, orientation: Orientation): void;
   clearArea(category: PanelCategory): void;
   toggleLayer(category: PanelCategory): void;
   autoFillRun(from: { x: number; y: number }, to: { x: number; y: number }): void;
@@ -163,6 +169,7 @@ export const useStore = create<AppState>()((set, get) => {
     activeCategory: 'wall',
     openingBrush: null,
     hiddenLayers: [],
+    areaAxis: {},
     calibration: { active: false, from: null, to: null },
     selection: [],
     wallAnchor: null,
@@ -289,14 +296,20 @@ export const useStore = create<AppState>()((set, get) => {
      * Strips run whichever way covers more, since an architect should not have
      * to work out which axis divides by 10 ft.
      */
-    fillArea: (category) => {
+    fillArea: (category, orientation) => {
       const footprint = interiorCells(get().plan.panels);
       if (footprint.cells.length === 0) {
         get().notify('Close the walls into a room before filling a floor or roof.', 'error');
         return;
       }
 
-      const result = bestTileFootprint(footprint, category);
+      // With no direction asked for, pick whichever strip direction covers more
+      // of the building; with one, lay it that way even if it covers less. The
+      // architect may have a reason - a joist run, a slope - that the panel
+      // count cannot see.
+      const result = orientation
+        ? { ...tileFootprint(footprint, category, orientation), orientation }
+        : bestTileFootprint(footprint, category);
       if (result.panels.length === 0) {
         get().notify(
           `No part of this building is 10 ft deep, so no ${category} panel fits.`,
@@ -309,11 +322,30 @@ export const useStore = create<AppState>()((set, get) => {
         ...doc,
         panels: [...doc.panels.filter((p) => p.category !== category), ...result.panels],
       }));
+      // Record the direction actually used, including the one picked
+      // automatically, so the control reflects the real layout rather than a
+      // guess at it.
+      set((state) => ({ areaAxis: { ...state.areaAxis, [category]: result.orientation } }));
 
       if (result.uncoveredSqFt > 0) {
         get().notify(
           `${result.uncoveredSqFt} sq ft has no ${category}: a 10 ft panel cannot reach a strip that shallow.`,
         );
+      }
+    },
+
+    /**
+     * Re-lay a floor or roof with its 10 ft strips running the other way.
+     *
+     * The toggle is the action, not a setting to apply later: choosing a
+     * direction with panels already down re-fills immediately, and choosing one
+     * with nothing down just remembers it for the next fill.
+     */
+    setAreaAxis: (category, orientation) => {
+      if (get().areaAxis[category] === orientation) return;
+      set((state) => ({ areaAxis: { ...state.areaAxis, [category]: orientation } }));
+      if (get().plan.panels.some((p) => p.category === category)) {
+        get().fillArea(category, orientation);
       }
     },
 
@@ -351,16 +383,39 @@ export const useStore = create<AppState>()((set, get) => {
       set({ wallAnchor: null });
     },
 
-    movePanel: (id, x, y) =>
+    /**
+     * Drop a dragged panel at a grid position.
+     *
+     * An *area* panel's drop is checked: it claims a whole block of cells, so a
+     * bad drop buries a neighbour under it and is hard to see and harder to
+     * undo. A linear panel's drop is deliberately not checked - dragging a wall
+     * into an overlap and then tidying it up is a normal way to work, and the
+     * validator already says so on screen.
+     */
+    movePanel: (id, x, y) => {
+      const { panels: current, plot } = get().plan;
+      const moving = current.find((p) => p.id === id);
+      if (!moving || (moving.x === x && moving.y === y)) return;
+
+      if (!isLinearCategory(moving.category)) {
+        const candidate = { ...moving, x, y };
+        if (!canPlace(current, plot, candidate)) {
+          get().notify(
+            `That would put the ${moving.category} panel on top of another one, or outside the plot.`,
+            'error',
+          );
+          return;
+        }
+      }
+
       commit((doc) => {
         const index = doc.panels.findIndex((p) => p.id === id);
         if (index < 0) return null;
-        const existing = doc.panels[index];
-        if (existing.x === x && existing.y === y) return null;
         const panels = [...doc.panels];
-        panels[index] = { ...existing, x, y };
+        panels[index] = { ...panels[index], x, y };
         return { ...doc, panels };
-      }),
+      });
+    },
 
     rotateSelection: () => {
       const selected = new Set(get().selection);

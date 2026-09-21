@@ -1,10 +1,8 @@
-import { useCallback } from 'react';
 import { Arc, Group, Line, Rect } from 'react-konva';
-import type Konva from 'konva';
 import { categoryColor, getPanelSpec } from '../core/panels';
 import { isOpeningCategory } from '../core/types';
 import type { Panel } from '../core/types';
-import { COLORS, PX_PER_UNIT, WALL_PX } from './view';
+import { COLORS, PX_PER_UNIT, WALL_PX, snapToGrid } from './view';
 
 interface Props {
   panel: Panel;
@@ -27,24 +25,6 @@ export function PanelShape({ panel, selected, flagged, draggable, onSelect, onMo
   const offsetX = panel.orientation === 'h' ? 0 : WALL_PX / 2;
   const offsetY = panel.orientation === 'h' ? WALL_PX / 2 : 0;
 
-  // Live-snap the drag to the 2 ft grid. Konva hands us absolute stage
-  // coordinates, so undo the stage transform, snap in world space, redo it.
-  const dragBoundFunc = useCallback(
-    function (this: Konva.Node, pos: Konva.Vector2d): Konva.Vector2d {
-      const stage = this.getStage();
-      if (!stage) return pos;
-      const scale = stage.scaleX() || 1;
-      const originX = stage.x();
-      const originY = stage.y();
-      const worldX = (pos.x - originX) / scale;
-      const worldY = (pos.y - originY) / scale;
-      const snappedX = Math.round(worldX / PX_PER_UNIT) * PX_PER_UNIT;
-      const snappedY = Math.round(worldY / PX_PER_UNIT) * PX_PER_UNIT;
-      return { x: snappedX * scale + originX, y: snappedY * scale + originY };
-    },
-    [],
-  );
-
   const fill = flagged ? COLORS.error : categoryColor(panel.category);
   const opening = isOpeningCategory(panel.category);
 
@@ -53,7 +33,7 @@ export function PanelShape({ panel, selected, flagged, draggable, onSelect, onMo
       x={panel.x * PX_PER_UNIT}
       y={panel.y * PX_PER_UNIT}
       draggable={draggable}
-      dragBoundFunc={dragBoundFunc}
+      dragBoundFunc={snapToGrid}
       onMouseDown={(e) => {
         e.cancelBubble = true;
         onSelect(panel.id, e.evt.shiftKey);

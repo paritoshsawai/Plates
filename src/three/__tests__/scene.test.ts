@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
 import type { BoxGeometry, Mesh } from 'three';
 import { SLAB_THICKNESS_FT, buildScene, disposeScene } from '../scene';
 import { WALL_HEIGHT_FT } from '../../core/units';
@@ -14,10 +15,18 @@ const wall = (over: Partial<Panel> = {}): Panel => ({
   ...over,
 });
 
-/** Every mesh in a build, with its size and centre, for asserting geometry. */
+/**
+ * Every *visible* mesh in a build, with its size and centre, for asserting
+ * geometry. Zero-opacity meshes are pick targets - the invisible box filling a
+ * doorway, say - and are not part of what the model looks like.
+ */
 function meshes(panels: Panel[]) {
   const { group } = buildScene(panels);
-  return group.children.map((child) => {
+  const visible = group.children.filter((child) => {
+    const material = (child as Mesh).material as { opacity?: number } | undefined;
+    return material?.opacity !== 0;
+  });
+  return visible.map((child) => {
     const mesh = child as Mesh;
     const params = (mesh.geometry as BoxGeometry).parameters;
     return {
@@ -55,6 +64,8 @@ describe('buildScene coordinate mapping', () => {
 
 describe('openings are built, not subtracted', () => {
   it('gives a door only a header, leaving the opening empty', () => {
+    // Nothing solid stands in the opening. The slot does carry an invisible
+    // pick target, covered separately below, but it draws nothing.
     const built = meshes([wall({ category: 'door' })]);
     expect(built).toHaveLength(1);
     // 10 ft wall less a 7 ft door head.
@@ -117,5 +128,36 @@ describe('the scene as a whole', () => {
   it('disposes cleanly', () => {
     const { group } = buildScene([wall()]);
     expect(() => disposeScene(group)).not.toThrow();
+  });
+
+  it('makes every part of a window clickable, glass included', () => {
+    // A window is a sill, a header and the glass between them. The glass is
+    // the obvious place to click, and leaving it out of the pick map made the
+    // middle of every window select nothing.
+    const { group, pickMap } = buildScene([wall({ id: 'w1', category: 'window' })]);
+    expect(group.children).toHaveLength(3);
+    expect([...pickMap.values()].filter((id) => id === 'w1')).toHaveLength(3);
+  });
+
+  it('makes the doorway itself clickable, not just the header', () => {
+    // A door is drawn as a header with an empty slot beneath. Without a pick
+    // target in the slot, a click at door height sails straight through the
+    // opening and hits whatever is behind, so clicking a door a second time
+    // converted the far wall instead of reverting this one.
+    const { pickMap } = buildScene([wall({ id: 'd1', category: 'door' })]);
+    expect([...pickMap.values()]).toEqual(['d1', 'd1']);
+  });
+
+  it('really does raycast the invisible doorway', () => {
+    // Zero opacity, not visible:false - the raycaster has to still see it.
+    // Fire a ray at knee height straight through where the door stands.
+    const { group, pickMap } = buildScene([wall({ id: 'd1', category: 'door' })]);
+    const raycaster = new THREE.Raycaster(
+      new THREE.Vector3(2, 3, -20),
+      new THREE.Vector3(0, 0, 1).normalize(),
+    );
+    const hit = raycaster.intersectObjects(group.children, false)[0];
+    expect(hit).toBeDefined();
+    expect(pickMap.get(hit.object)).toBe('d1');
   });
 });

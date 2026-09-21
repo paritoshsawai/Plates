@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { buildEdgeIndex } from '../../core/walls';
 import { edgeKey, panelEdges } from '../../core/panels';
 import { rectPlotFromFt } from '../../core/plot';
+import { tileRun } from '../../core/tiling';
 import type { Panel } from '../../core/types';
 
 /** Grid edges a set of panels covers, as a comparable sorted list. */
@@ -227,5 +228,189 @@ describe('nudgeSelection', () => {
     useStore.getState().nudgeSelection(0, 1);
     useStore.getState().undo();
     expect(panels().map((p) => p.y)).toEqual([2, 2]);
+  });
+});
+
+describe('fillArea strip direction', () => {
+  /** A closed rectangular room, in feet, anchored at the origin. */
+  function room(widthFt: number, depthFt: number): Panel[] {
+    const w = widthFt / 2;
+    const d = depthFt / 2;
+    return [
+      ...tileRun(0, 0, w, 'h')!,
+      ...tileRun(0, d, w, 'h')!,
+      ...tileRun(0, 0, d, 'v')!,
+      ...tileRun(w, 0, d, 'v')!,
+    ];
+  }
+
+  function seedRoom(widthFt: number, depthFt: number) {
+    useStore.setState((state) => ({
+      plan: { ...state.plan, panels: room(widthFt, depthFt), plot: rectPlotFromFt(80, 80) },
+      past: [],
+      future: [],
+      selection: [],
+      areaAxis: {},
+      message: null,
+    }));
+  }
+
+  const floors = () => panels().filter((p) => p.category === 'floor');
+  const axis = () => useStore.getState().areaAxis.floor;
+
+  it('records the direction an automatic fill chose', () => {
+    seedRoom(20, 20);
+    useStore.getState().fillArea('floor');
+    expect(floors().length).toBeGreaterThan(0);
+    expect(axis()).toBeDefined();
+  });
+
+  it('lays the strips the way it is asked to', () => {
+    seedRoom(20, 20);
+    useStore.getState().fillArea('floor', 'v');
+    expect(axis()).toBe('v');
+    expect(floors().every((p) => p.orientation === 'v')).toBe(true);
+
+    useStore.getState().fillArea('floor', 'h');
+    expect(axis()).toBe('h');
+    expect(floors().every((p) => p.orientation === 'h')).toBe(true);
+  });
+
+  it('covers a square room equally well either way', () => {
+    // 20 x 20 ft is two 10 ft strips whichever way they run, so flipping must
+    // not cost panels - it is purely the architect's choice.
+    seedRoom(20, 20);
+    useStore.getState().fillArea('floor', 'h');
+    const across = floors().length;
+    useStore.getState().fillArea('floor', 'v');
+    expect(floors().length).toBe(across);
+  });
+
+  it('replaces rather than stacks, so flipping never doubles the floor', () => {
+    seedRoom(20, 20);
+    useStore.getState().fillArea('floor', 'h');
+    const first = floors().length;
+    useStore.getState().fillArea('floor', 'v');
+    useStore.getState().fillArea('floor', 'h');
+    expect(floors().length).toBe(first);
+  });
+
+  it('leaves the other category alone', () => {
+    seedRoom(20, 20);
+    useStore.getState().fillArea('roof');
+    const roofs = panels().filter((p) => p.category === 'roof').length;
+    useStore.getState().fillArea('floor', 'v');
+    expect(panels().filter((p) => p.category === 'roof')).toHaveLength(roofs);
+  });
+});
+
+describe('setAreaAxis', () => {
+  function seedRoom() {
+    const panelsIn = [
+      ...tileRun(0, 0, 10, 'h')!,
+      ...tileRun(0, 10, 10, 'h')!,
+      ...tileRun(0, 0, 10, 'v')!,
+      ...tileRun(10, 0, 10, 'v')!,
+    ];
+    useStore.setState((state) => ({
+      plan: { ...state.plan, panels: panelsIn, plot: rectPlotFromFt(80, 80) },
+      past: [],
+      future: [],
+      selection: [],
+      areaAxis: {},
+      message: null,
+    }));
+  }
+
+  it('re-lays an existing floor immediately', () => {
+    seedRoom();
+    useStore.getState().fillArea('floor', 'h');
+    useStore.getState().setAreaAxis('floor', 'v');
+    expect(useStore.getState().areaAxis.floor).toBe('v');
+    expect(panels().filter((p) => p.category === 'floor').every((p) => p.orientation === 'v')).toBe(
+      true,
+    );
+  });
+
+  it('just remembers the choice when nothing is laid yet', () => {
+    seedRoom();
+    useStore.getState().setAreaAxis('floor', 'v');
+    expect(useStore.getState().areaAxis.floor).toBe('v');
+    expect(panels().filter((p) => p.category === 'floor')).toHaveLength(0);
+  });
+
+  it('does nothing when the direction is already the current one', () => {
+    seedRoom();
+    useStore.getState().fillArea('floor', 'h');
+    const before = panels().filter((p) => p.category === 'floor').map((p) => p.id);
+    useStore.getState().setAreaAxis('floor', 'h');
+    expect(panels().filter((p) => p.category === 'floor').map((p) => p.id)).toEqual(before);
+  });
+});
+
+describe('movePanel', () => {
+  const floor = (over: Partial<Panel>): Panel => ({
+    id: 'f',
+    category: 'floor',
+    size: '4x10',
+    x: 0,
+    y: 0,
+    orientation: 'h',
+    ...over,
+  });
+
+  function seedIn(panelsIn: Panel[]) {
+    useStore.setState((state) => ({
+      plan: { ...state.plan, panels: panelsIn, plot: rectPlotFromFt(80, 80) },
+      past: [],
+      future: [],
+      selection: [],
+      message: null,
+    }));
+  }
+
+  it('moves an area panel to clear ground', () => {
+    seedIn([floor({})]);
+    useStore.getState().movePanel('f', 6, 0);
+    expect(panels()[0]).toMatchObject({ x: 6, y: 0 });
+  });
+
+  it('refuses to drop an area panel on another of its own kind', () => {
+    // A floor panel is 2 x 5 cells, so x=0 and x=1 overlap.
+    seedIn([floor({}), floor({ id: 'g', x: 4 })]);
+    useStore.getState().movePanel('f', 3, 0);
+    expect(panels()[0]).toMatchObject({ x: 0, y: 0 });
+    expect(useStore.getState().message?.tone).toBe('error');
+  });
+
+  it('refuses to drop an area panel outside the plot', () => {
+    useStore.setState((state) => ({
+      plan: { ...state.plan, panels: [floor({})], plot: rectPlotFromFt(20, 20) },
+      past: [],
+      future: [],
+      message: null,
+    }));
+    useStore.getState().movePanel('f', 9, 0);
+    expect(panels()[0]).toMatchObject({ x: 0, y: 0 });
+  });
+
+  it('lets a floor move under an existing roof, which is what a building is', () => {
+    seedIn([floor({}), floor({ id: 'r', category: 'roof', x: 6 })]);
+    useStore.getState().movePanel('f', 6, 0);
+    expect(panels()[0]).toMatchObject({ x: 6, y: 0 });
+  });
+
+  it('leaves a wall drag unguarded, so the tidy-it-up-after workflow still works', () => {
+    const wall = (id: string, x: number): Panel => ({
+      id,
+      category: 'wall',
+      size: '4x10',
+      x,
+      y: 0,
+      orientation: 'h',
+    });
+    seedIn([wall('a', 0), wall('b', 4)]);
+    useStore.getState().movePanel('a', 4, 0);
+    expect(panels()[0]).toMatchObject({ x: 4, y: 0 });
   });
 });

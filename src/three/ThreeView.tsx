@@ -17,6 +17,7 @@ import {
 } from './controls';
 import type { Orbit } from './controls';
 import { useStore } from '../state/store';
+import { CATEGORY_STYLE, resolveOpeningClick } from '../core/panels';
 import type { Panel } from '../core/types';
 
 /**
@@ -46,6 +47,8 @@ export default function ThreeView() {
   const panels = useStore((s) => s.plan.panels);
   const selection = useStore((s) => s.selection);
   const select = useStore((s) => s.select);
+  const openingBrush = useStore((s) => s.openingBrush);
+  const setPanelCategory = useStore((s) => s.setPanelCategory);
 
   // Kept in refs so the render loop is set up once and never torn down by a
   // panel edit; only the model group is swapped.
@@ -57,6 +60,26 @@ export default function ThreeView() {
   const touchedRef = useRef(false);
   const fitRef = useRef<(() => void) | null>(null);
   const invalidateRef = useRef<(() => void) | null>(null);
+
+  /**
+   * What a click on a panel does, refreshed every render.
+   *
+   * The renderer is built once and must not be torn down when the store
+   * changes, so the click handler inside that effect cannot close over the
+   * brush directly - it would read whatever was armed when the canvas was
+   * created. A ref updated each render is the same trick the plan canvas uses
+   * for its marquee.
+   */
+  const onPickRef = useRef<(id: string | undefined) => void>(() => {});
+  onPickRef.current = (id) => {
+    const panel = id ? panels.find((p) => p.id === id) : undefined;
+    const converted = resolveOpeningClick(panel, openingBrush);
+    if (converted && panel) {
+      setPanelCategory(panel.id, converted);
+      return;
+    }
+    select(id ? [id] : []);
+  };
 
   const desiredRef = useRef<Orbit>({
     radius: 80,
@@ -262,8 +285,7 @@ export default function ThreeView() {
       const model = modelRef.current;
       if (!model) return;
       const hit = raycaster.intersectObjects(model.children, false)[0];
-      const id = hit ? pickRef.current.get(hit.object) : undefined;
-      select(id ? [id] : []);
+      onPickRef.current(hit ? pickRef.current.get(hit.object) : undefined);
     };
 
     // Without this the right button opens the browser menu mid-pan.
@@ -410,7 +432,13 @@ export default function ThreeView() {
 
   return (
     <div className="relative h-full w-full overflow-hidden">
-      <div ref={containerRef} className="h-full w-full overflow-hidden" />
+      <div
+        ref={containerRef}
+        className="h-full w-full overflow-hidden"
+        // Matches the plan view's affordance: an armed brush means the next
+        // click converts a panel rather than selecting it.
+        style={{ cursor: openingBrush ? 'cell' : undefined }}
+      />
 
       <div className="absolute right-3 top-3 flex gap-1.5">
         {([
@@ -438,7 +466,10 @@ export default function ThreeView() {
 
       <p className="pointer-events-none absolute inset-x-0 bottom-0 p-3 text-center text-xs text-slate-500">
         Drag to orbit &middot; right-drag, middle-drag or shift-drag to pan &middot; scroll to zoom
-        at the cursor &middot; click a panel to select it
+        at the cursor &middot;{' '}
+        {openingBrush
+          ? `click a wall to turn it into a ${CATEGORY_STYLE[openingBrush].label.toLowerCase()}`
+          : 'click a panel to select it'}
       </p>
       {panels.length === 0 && (
         <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-500">

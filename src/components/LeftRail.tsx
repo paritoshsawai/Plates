@@ -35,6 +35,8 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
   const panels = useStore((s) => s.plan.panels);
   const splitPanel = useStore((s) => s.splitPanel);
   const fillArea = useStore((s) => s.fillArea);
+  const areaAxis = useStore((s) => s.areaAxis);
+  const setAreaAxis = useStore((s) => s.setAreaAxis);
   const clearArea = useStore((s) => s.clearArea);
   const hiddenLayers = useStore((s) => s.hiddenLayers);
   const toggleLayer = useStore((s) => s.toggleLayer);
@@ -162,7 +164,7 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
                     <span className="text-xs tabular-nums text-slate-500">{count}</span>
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    <Button onClick={() => fillArea(category)}>
+                    <Button onClick={() => fillArea(category, areaAxis[category])}>
                       {count > 0 ? 'Refill' : 'Fill'}
                     </Button>
                     {count > 0 && (
@@ -176,13 +178,40 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
                       </>
                     )}
                   </div>
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <span className="text-xs text-slate-500">Strips</span>
+                    {(
+                      [
+                        ['h', '\u2194', 'across'],
+                        ['v', '\u2195', 'down'],
+                      ] as const
+                    ).map(([axis, glyph, label]) => (
+                      <button
+                        key={axis}
+                        type="button"
+                        onClick={() => setAreaAxis(category, axis)}
+                        title={`Run the 10 ft strips ${label} the plan`}
+                        aria-label={`${CATEGORY_STYLE[category].plural}: strips ${label}`}
+                        aria-pressed={areaAxis[category] === axis}
+                        className={`rounded border px-2 py-0.5 text-xs leading-5 ${
+                          areaAxis[category] === axis
+                            ? 'border-slate-900 bg-slate-900 text-white'
+                            : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {glyph}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               );
             })}
           </div>
           <p className="mt-2 text-xs leading-snug text-slate-500">
             Panels lie flat here, so their 10 ft dimension is in plan: they fill the building in
-            10 ft strips. Anything shallower than 10 ft is reported, never approximated.
+            10 ft strips. Anything shallower than 10 ft is reported, never approximated. Fill picks
+            the strip direction that covers most of the building; the arrows re-lay it the other
+            way.
           </p>
         </section>
       )}

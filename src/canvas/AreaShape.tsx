@@ -1,13 +1,15 @@
 import { Rect } from 'react-konva';
 import { AREA_DEPTH_UNITS, categoryColor, getPanelSpec } from '../core/panels';
 import type { Panel } from '../core/types';
-import { COLORS, PX_PER_UNIT } from './view';
+import { COLORS, PX_PER_UNIT, snapToGrid } from './view';
 
 interface Props {
   panel: Panel;
   selected: boolean;
   flagged: boolean;
+  draggable: boolean;
   onSelect(id: string, additive: boolean): void;
+  onMoved(id: string, x: number, y: number): void;
 }
 
 /**
@@ -17,7 +19,7 @@ interface Props {
  * the wall line - which is what the architect is actually drawing - stays the
  * thing you read first.
  */
-export function AreaShape({ panel, selected, flagged, onSelect }: Props) {
+export function AreaShape({ panel, selected, flagged, draggable, onSelect, onMoved }: Props) {
   const spec = getPanelSpec(panel.size);
   const widthUnits = panel.orientation === 'h' ? spec.widthUnits : AREA_DEPTH_UNITS;
   const heightUnits = panel.orientation === 'h' ? AREA_DEPTH_UNITS : spec.widthUnits;
@@ -32,9 +34,15 @@ export function AreaShape({ panel, selected, flagged, onSelect }: Props) {
       opacity={flagged ? 0.45 : selected ? 0.55 : 0.28}
       stroke={selected ? COLORS.selection : '#ffffff'}
       strokeWidth={selected ? 2.5 : 1}
+      draggable={draggable}
+      dragBoundFunc={snapToGrid}
       onMouseDown={(e) => {
         e.cancelBubble = true;
         onSelect(panel.id, e.evt.shiftKey);
+      }}
+      onDragEnd={(e) => {
+        const node = e.target;
+        onMoved(panel.id, Math.round(node.x() / PX_PER_UNIT), Math.round(node.y() / PX_PER_UNIT));
       }}
       perfectDrawEnabled={false}
     />

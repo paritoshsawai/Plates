@@ -83,6 +83,15 @@ satisfies the item.
   four times the pixels needed. Browser verification now runs at `deviceScaleFactor: 2`, because at
   1 this bug is invisible and survived three rounds of checks.
 
+- **Openings are placed from either view.** Both the plan and the 3D scene route a click through
+  one `resolveOpeningClick`, so the rule cannot drift between them. It is also the only guard 3D
+  has: the plan view can stop a door brush reaching a floor with layer hit-testing, but the scene
+  is a single flat group. A door's empty slot carries an invisible pick target, because otherwise a
+  second click sails through the doorway and converts the wall behind it.
+- **Floor and roof strip direction is the architect's to set.** Fill still picks whichever
+  direction covers more of the building, but the choice is exposed and the layout records which
+  direction it actually used.
+
 ## Still not built
 
 Multi-storey stacking · DXF export and factory view · branded client-shareable quote links ·
@@ -110,7 +119,7 @@ modelling one.
 
 ## Test coverage
 
-266 unit tests across `core/`, `state/`, `three/` and `canvas/view.ts`, plus a Playwright drive of the built app that
+289 unit tests across `core/`, `state/`, `three/` and `canvas/view.ts`, plus a Playwright drive of the built app that
 exercises drawing, selection, deletion, undo, the placement guards, pricing, all five exports, save
 and reopen, and the read-only client view. Drawing a 20 × 16 ft room in the browser produces the
 same 18 panels / 72 linear ft the unit tests assert.
