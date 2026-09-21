@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { boundingSphere, buildScene, disposeScene, fitRadius } from './scene';
 import {
@@ -17,7 +17,7 @@ import {
 } from './controls';
 import type { Orbit } from './controls';
 import { useStore } from '../state/store';
-import { CATEGORY_STYLE, resolveOpeningClick } from '../core/panels';
+import { CATEGORY_STYLE, resolveOpeningClick, visiblePanels } from '../core/panels';
 import type { Panel } from '../core/types';
 
 /**
@@ -44,7 +44,14 @@ function cloneOrbit(orbit: Orbit): Orbit {
 
 export default function ThreeView() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const panels = useStore((s) => s.plan.panels);
+  const allPanels = useStore((s) => s.plan.panels);
+  const hiddenLayers = useStore((s) => s.hiddenLayers);
+  // The scene is built from what is visible, so a hidden layer is neither drawn
+  // nor in the pick map - it cannot be clicked, selected or converted.
+  const panels = useMemo(
+    () => visiblePanels(allPanels, hiddenLayers),
+    [allPanels, hiddenLayers],
+  );
   const selection = useStore((s) => s.selection);
   const select = useStore((s) => s.select);
   const openingBrush = useStore((s) => s.openingBrush);

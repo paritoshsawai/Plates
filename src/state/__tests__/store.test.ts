@@ -4,7 +4,7 @@ import { buildEdgeIndex } from '../../core/walls';
 import { edgeKey, panelEdges } from '../../core/panels';
 import { rectPlotFromFt } from '../../core/plot';
 import { tileRun } from '../../core/tiling';
-import type { Panel } from '../../core/types';
+import type { Panel, PanelCategory } from '../../core/types';
 
 /** Grid edges a set of panels covers, as a comparable sorted list. */
 function coverage(panels: Panel[]): string[] {
@@ -412,5 +412,115 @@ describe('movePanel', () => {
     seedIn([wall('a', 0), wall('b', 4)]);
     useStore.getState().movePanel('a', 4, 0);
     expect(panels()[0]).toMatchObject({ x: 4, y: 0 });
+  });
+});
+
+describe('hidden layers', () => {
+  function seedIn(panelsIn: Panel[], hiddenLayers: PanelCategory[] = [], selection: string[] = []) {
+    useStore.setState((state) => ({
+      plan: { ...state.plan, panels: panelsIn, plot: rectPlotFromFt(80, 80) },
+      past: [],
+      future: [],
+      selection,
+      hiddenLayers,
+      areaAxis: {},
+      message: null,
+    }));
+  }
+
+  const wall = (id: string, x: number): Panel => ({
+    id,
+    category: 'wall',
+    size: '4x10',
+    x,
+    y: 0,
+    orientation: 'h',
+  });
+  const floor = (id: string, x = 0): Panel => ({
+    id,
+    category: 'floor',
+    size: '4x10',
+    x,
+    y: 0,
+    orientation: 'h',
+  });
+
+  const hidden = () => useStore.getState().hiddenLayers;
+
+  describe('nothing is ever created invisible', () => {
+    it('reveals a category when panels are added to it', () => {
+      seedIn([], ['wall']);
+      useStore.getState().addPanels([wall('a', 0)]);
+      expect(hidden()).not.toContain('wall');
+    });
+
+    it('reveals the target category of a conversion', () => {
+      // Doors hidden, then a wall is turned into one: without this the panel
+      // silently vanishes and the tool looks broken.
+      seedIn([wall('a', 0)], ['door']);
+      useStore.getState().setPanelCategory('a', 'door');
+      expect(hidden()).not.toContain('door');
+    });
+
+    it('reveals a floor that gets filled after being hidden and cleared', () => {
+      const room = [
+        ...tileRun(0, 0, 10, 'h')!,
+        ...tileRun(0, 10, 10, 'h')!,
+        ...tileRun(0, 0, 10, 'v')!,
+        ...tileRun(10, 0, 10, 'v')!,
+      ];
+      seedIn(room, ['floor']);
+      useStore.getState().fillArea('floor');
+      expect(hidden()).not.toContain('floor');
+      expect(panels().some((p) => p.category === 'floor')).toBe(true);
+    });
+
+    it('leaves other hidden categories alone', () => {
+      seedIn([], ['wall', 'roof']);
+      useStore.getState().addPanels([wall('a', 0)]);
+      expect(hidden()).toEqual(['roof']);
+    });
+
+    it('does not reveal a category that only shrank', () => {
+      // Clearing a hidden floor must not un-hide it: nothing appeared.
+      seedIn([floor('f')], ['floor']);
+      useStore.getState().clearArea('floor');
+      expect(hidden()).toContain('floor');
+    });
+
+    it('does not reveal on a move, which creates nothing', () => {
+      seedIn([wall('a', 0)], ['roof']);
+      useStore.getState().movePanel('a', 4, 0);
+      expect(hidden()).toContain('roof');
+    });
+  });
+
+  describe('hidden panels are not selected', () => {
+    it('drops the hidden category from the selection', () => {
+      seedIn([wall('a', 0), floor('f', 0)], [], ['a', 'f']);
+      useStore.getState().toggleLayer('floor');
+      expect(useStore.getState().selection).toEqual(['a']);
+    });
+
+    it('leaves the selection alone when showing a layer again', () => {
+      seedIn([wall('a', 0)], ['floor'], ['a']);
+      useStore.getState().toggleLayer('floor');
+      expect(useStore.getState().selection).toEqual(['a']);
+      expect(hidden()).toEqual([]);
+    });
+
+    it('keeps selectAll to what is on screen', () => {
+      seedIn([wall('a', 0), floor('f', 0)], ['floor']);
+      useStore.getState().selectAll();
+      expect(useStore.getState().selection).toEqual(['a']);
+    });
+  });
+
+  describe('showAllLayers', () => {
+    it('reveals everything at once', () => {
+      seedIn([wall('a', 0)], ['wall', 'floor', 'roof']);
+      useStore.getState().showAllLayers();
+      expect(hidden()).toEqual([]);
+    });
   });
 });

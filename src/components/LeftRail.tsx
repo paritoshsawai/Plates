@@ -1,4 +1,5 @@
 import {
+  ALL_CATEGORIES,
   CATEGORY_STYLE,
   FILLABLE_CATEGORIES,
   OPENING_CATEGORIES,
@@ -40,6 +41,7 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
   const clearArea = useStore((s) => s.clearArea);
   const hiddenLayers = useStore((s) => s.hiddenLayers);
   const toggleLayer = useStore((s) => s.toggleLayer);
+  const showAllLayers = useStore((s) => s.showAllLayers);
   const underlay = useStore((s) => s.plan.underlay);
 
   const countIn = (category: PanelCategory) =>
@@ -145,6 +147,54 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
         </p>
       </section>
 
+      <section>
+        <SectionTitle>Layers</SectionTitle>
+        <div className="grid gap-1">
+          {ALL_CATEGORIES.map((category) => {
+            const count = countIn(category);
+            const hidden = hiddenLayers.includes(category);
+            return (
+              <button
+                key={category}
+                type="button"
+                onClick={() => toggleLayer(category)}
+                aria-pressed={!hidden}
+                // Names the action, not the state, which is what a toggle button
+                // should announce - and keeps it distinct from the strip buttons.
+                aria-label={`${hidden ? 'Show' : 'Hide'} ${CATEGORY_STYLE[category].plural}`}
+                className={`flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition hover:bg-slate-50 ${
+                  hidden ? 'text-slate-400' : 'text-slate-700'
+                }`}
+              >
+                <span
+                  className="h-3 w-3 shrink-0 rounded-sm"
+                  style={{
+                    backgroundColor: CATEGORY_STYLE[category].color,
+                    opacity: hidden ? 0.3 : 1,
+                  }}
+                />
+                <span className="flex-1">{CATEGORY_STYLE[category].plural}</span>
+                <span className="tabular-nums text-xs text-slate-400">{count}</span>
+                <span className="w-10 shrink-0 text-right text-xs font-medium">
+                  {hidden ? 'Show' : 'Hide'}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {hiddenLayers.length > 0 && (
+          <div className="mt-1.5">
+            <Button variant="ghost" onClick={showAllLayers}>
+              Show all layers
+            </Button>
+          </div>
+        )}
+        <p className="mt-2 text-xs leading-snug text-slate-500">
+          Hiding is a view control only. A hidden layer is still built, still validated and still
+          priced &mdash; it just gets out of the way so you can see underneath.
+        </p>
+      </section>
+
       {!readOnly && (
         <section>
           <SectionTitle>Floor &amp; roof</SectionTitle>
@@ -168,14 +218,9 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
                       {count > 0 ? 'Refill' : 'Fill'}
                     </Button>
                     {count > 0 && (
-                      <>
-                        <Button variant="danger" onClick={() => clearArea(category)}>
-                          Clear
-                        </Button>
-                        <Button variant="ghost" onClick={() => toggleLayer(category)}>
-                          {hiddenLayers.includes(category) ? 'Show' : 'Hide'}
-                        </Button>
-                      </>
+                      <Button variant="danger" onClick={() => clearArea(category)}>
+                        Clear
+                      </Button>
                     )}
                   </div>
                   <div className="mt-1.5 flex items-center gap-1.5">

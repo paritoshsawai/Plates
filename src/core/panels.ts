@@ -256,3 +256,24 @@ export function resolveOpeningClick(
   // control both applies and undoes.
   return panel.category === brush ? 'wall' : brush;
 }
+
+/** Every category, in the order the UI should list them. */
+export const ALL_CATEGORIES = Object.keys(CATEGORY_STYLE) as PanelCategory[];
+
+/**
+ * The panels a view should draw, given the layers currently hidden.
+ *
+ * One definition for both views. The plan canvas used to filter inline and the
+ * 3D scene did not filter at all, so hiding a roof left it fully drawn - and
+ * fully clickable - in 3D. Sharing this also fixes picking for free: a panel
+ * that was never built is not in the scene's pick map, so it cannot be selected
+ * or converted by an opening brush.
+ *
+ * Hiding is a *view* control. These panels are still in the plan, still
+ * validated and still counted in the BOM: a hidden roof is one you cannot see,
+ * not one you are not building.
+ */
+export function visiblePanels(panels: Panel[], hiddenLayers: PanelCategory[]): Panel[] {
+  if (hiddenLayers.length === 0) return panels;
+  return panels.filter((panel) => !hiddenLayers.includes(panel.category));
+}

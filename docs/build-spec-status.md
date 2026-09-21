@@ -92,6 +92,12 @@ satisfies the item.
   direction covers more of the building, but the choice is exposed and the layout records which
   direction it actually used.
 
+- **Hiding a layer is a view control, and it holds everywhere.** Both views draw through one
+  `visiblePanels`, so a hidden layer is neither rendered nor pickable in 3D; the BOM, validation
+  and the quote all keep reading the whole plan. Creating a panel in a hidden category reveals it,
+  enforced inside `commit` rather than at each creation site, so a path added later cannot forget
+  it and leave the user with a tool that looks dead.
+
 ## Still not built
 
 Multi-storey stacking · DXF export and factory view · branded client-shareable quote links ·
@@ -119,7 +125,7 @@ modelling one.
 
 ## Test coverage
 
-289 unit tests across `core/`, `state/`, `three/` and `canvas/view.ts`, plus a Playwright drive of the built app that
+307 unit tests across `core/`, `state/`, `three/` and `canvas/view.ts`, plus a Playwright drive of the built app that
 exercises drawing, selection, deletion, undo, the placement guards, pricing, all five exports, save
 and reopen, and the read-only client view. Drawing a 20 × 16 ft room in the browser produces the
 same 18 panels / 72 linear ft the unit tests assert.

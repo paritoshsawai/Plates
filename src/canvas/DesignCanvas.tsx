@@ -19,7 +19,13 @@ import { COLORS, PX_PER_UNIT, fitToBox, nearestEdge, nearestNode, visibleUnits, 
 import type { Viewport } from './view';
 import { plotBboxUnits } from '../core/plot';
 import { isInsidePlot, wouldOverlap } from '../core/validation';
-import { newPanelId, panelBoundsUnits, rectsIntersect, resolveOpeningClick } from '../core/panels';
+import {
+  newPanelId,
+  panelBoundsUnits,
+  rectsIntersect,
+  resolveOpeningClick,
+  visiblePanels,
+} from '../core/panels';
 import { detectJunctions } from '../core/junctions';
 import { useStore } from '../state/store';
 import { isLinearCategory } from '../core/types';
@@ -71,7 +77,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
   // Hiding a layer only stops it drawing; the panels stay in the plan and in
   // the BOM, because hiding is a view control, not an edit.
   const visible = useMemo(
-    () => plan.panels.filter((panel) => !hiddenLayers.includes(panel.category)),
+    () => visiblePanels(plan.panels, hiddenLayers),
     [plan.panels, hiddenLayers],
   );
   const areaPanels = useMemo(

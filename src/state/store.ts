@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createPlan, deserializePlan } from '../core/plan';
-import { flipOrientation, getPanelSpec, newPanelId } from '../core/panels';
+import { flipOrientation, getPanelSpec, newPanelId, visiblePanels } from '../core/panels';
 import { isLinearCategory, isOpeningCategory } from '../core/types';
 import { normalizePlot } from '../core/plot';
 import { canPlace } from '../core/validation';
@@ -102,6 +102,7 @@ export interface AppState {
   setAreaAxis(category: PanelCategory, orientation: Orientation): void;
   clearArea(category: PanelCategory): void;
   toggleLayer(category: PanelCategory): void;
+  showAllLayers(): void;
   autoFillRun(from: { x: number; y: number }, to: { x: number; y: number }): void;
   movePanel(id: string, x: number, y: number): void;
   rotateSelection(): void;
@@ -143,17 +144,38 @@ export const useStore = create<AppState>()((set, get) => {
    * Apply an edit to the document and record it for undo. Every mutation goes
    * through here, so history can never drift out of step with the plan.
    */
+  const countByCategory = (panels: Panel[]): Map<PanelCategory, number> => {
+    const counts = new Map<PanelCategory, number>();
+    for (const panel of panels) counts.set(panel.category, (counts.get(panel.category) ?? 0) + 1);
+    return counts;
+  };
+
   const commit = (mutate: (doc: Doc) => Doc | null) => {
     const state = get();
     const current = docOf(state.plan);
     const next = mutate(current);
     if (!next) return;
     const past = [...state.past, current].slice(-HISTORY_LIMIT);
+
+    // Never leave the user staring at a tool that looks dead. Anything that
+    // *adds* panels to a hidden category reveals it - drawing a wall with walls
+    // hidden, filling a cleared floor, converting a wall into a hidden door.
+    // This lives here rather than at each of the seven creation sites because
+    // every panel mutation already passes through commit, so the invariant
+    // cannot be forgotten by a creation path written later. Actions that only
+    // remove panels, like clearArea, never trip it.
+    const before = countByCategory(current.panels);
+    const after = countByCategory(next.panels);
+    const hiddenLayers = state.hiddenLayers.filter(
+      (category) => (after.get(category) ?? 0) <= (before.get(category) ?? 0),
+    );
+
     set({
       plan: { ...state.plan, plot: next.plot, panels: next.panels, updatedAt: new Date().toISOString() },
       past,
       future: [],
       dirty: true,
+      hiddenLayers,
     });
   };
 
@@ -214,7 +236,11 @@ export const useStore = create<AppState>()((set, get) => {
         return { selection: [...next] };
       }),
     clearSelection: () => set({ selection: [] }),
-    selectAll: () => set((state) => ({ selection: state.plan.panels.map((p) => p.id), tool: 'select' })),
+    selectAll: () =>
+      set((state) => ({
+        selection: visiblePanels(state.plan.panels, state.hiddenLayers).map((p) => p.id),
+        tool: 'select',
+      })),
 
     addPanels: (panels) => {
       if (panels.length === 0) return;
@@ -356,11 +382,24 @@ export const useStore = create<AppState>()((set, get) => {
       }),
 
     toggleLayer: (category) =>
-      set((state) => ({
-        hiddenLayers: state.hiddenLayers.includes(category)
-          ? state.hiddenLayers.filter((c) => c !== category)
-          : [...state.hiddenLayers, category],
-      })),
+      set((state) => {
+        const hiding = !state.hiddenLayers.includes(category);
+        if (!hiding) {
+          return { hiddenLayers: state.hiddenLayers.filter((c) => c !== category) };
+        }
+        // Nothing off-screen stays selected: Rotate, Delete and the arrow keys
+        // all act on the selection, and acting on what you cannot see is how a
+        // layer control turns into lost work.
+        const hiddenIds = new Set(
+          state.plan.panels.filter((p) => p.category === category).map((p) => p.id),
+        );
+        return {
+          hiddenLayers: [...state.hiddenLayers, category],
+          selection: state.selection.filter((id) => !hiddenIds.has(id)),
+        };
+      }),
+
+    showAllLayers: () => set({ hiddenLayers: [] }),
 
     autoFillRun: (from, to) => {
       const dx = to.x - from.x;
