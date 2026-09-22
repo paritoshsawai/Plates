@@ -1,0 +1,279 @@
+import { GRID_FT, WALL_HEIGHT_FT } from './units';
+import { isLinearCategory, isOpeningCategory } from './types';
+import type {
+  ConnectorType,
+  GridCell,
+  GridEdge,
+  Orientation,
+  Panel,
+  PanelCategory,
+  PanelSizeId,
+  PanelSpec,
+} from './types';
+
+/**
+ * The panel catalog. Arplace manufactures exactly these; the tool must never
+ * invent a size, because a size that is not here cannot be built.
+ *
+ * Adding a third size here is the one change that breaks the greedy shortcut in
+ * `tiling.ts` - see the note there. The dynamic-programming path already
+ * handles it, so the catalog is safe to extend.
+ */
+export const PANEL_CATALOG: readonly PanelSpec[] = [
+  {
+    id: '4x10',
+    label: '4 ft x 10 ft',
+    widthFt: 4,
+    heightFt: WALL_HEIGHT_FT,
+    widthUnits: 4 / GRID_FT,
+  },
+  {
+    id: '2x10',
+    label: '2 ft x 10 ft',
+    widthFt: 2,
+    heightFt: WALL_HEIGHT_FT,
+    widthUnits: 2 / GRID_FT,
+  },
+] as const;
+
+/**
+ * Category presentation, shared by the canvas, the palette and the BOM.
+ *
+ * Colour encodes *category*, not size: a 4 ft panel is already visibly twice
+ * the length of a 2 ft one, so spending colour on size would say the same
+ * thing twice. Every hue stays clear of the validation red.
+ */
+export const CATEGORY_STYLE: Record<PanelCategory, { label: string; plural: string; color: string }> = {
+  wall: { label: 'Wall panel', plural: 'Wall panels', color: '#2563eb' },
+  floor: { label: 'Floor panel', plural: 'Floor panels', color: '#b45309' },
+  roof: { label: 'Roof panel', plural: 'Roof panels', color: '#7c3aed' },
+  door: { label: 'Door panel', plural: 'Door panels', color: '#0d9488' },
+  window: { label: 'Window panel', plural: 'Window panels', color: '#0891b2' },
+};
+
+export const CONNECTOR_STYLE: Record<ConnectorType, { label: string; plural: string }> = {
+  corner: { label: 'Corner connector', plural: 'Corner connectors' },
+  't-junction': { label: 'T-junction connector', plural: 'T-junction connectors' },
+  cross: { label: 'Cross connector', plural: 'Cross connectors' },
+};
+
+/** Categories the architect can draw runs in. Floor and roof arrive in Phase 3. */
+export const PLACEABLE_CATEGORIES: readonly PanelCategory[] = ['wall'];
+
+/** Categories filled from the building footprint rather than drawn by hand. */
+export const FILLABLE_CATEGORIES: readonly PanelCategory[] = ['floor', 'roof'];
+
+/**
+ * Categories applied by converting an existing panel rather than by drawing.
+ * Arplace pre-cuts openings into a panel at the factory, so a door *is* the
+ * panel occupying that slot.
+ */
+export const OPENING_CATEGORIES: readonly PanelCategory[] = ['door', 'window'];
+
+export function categoryColor(category: PanelCategory): string {
+  return CATEGORY_STYLE[category]?.color ?? CATEGORY_STYLE.wall.color;
+}
+
+/** Stable key for a priced SKU, used by the price table and the BOM counts. */
+export function skuKey(category: string, size: string): string {
+  return `${category}:${size}`;
+}
+
+const BY_ID = new Map<PanelSizeId, PanelSpec>(PANEL_CATALOG.map((p) => [p.id, p]));
+
+export function getPanelSpec(size: PanelSizeId): PanelSpec {
+  const spec = BY_ID.get(size);
+  if (!spec) throw new Error(`Unknown panel size: ${size}`);
+  return spec;
+}
+
+export function isKnownPanelSize(size: string): size is PanelSizeId {
+  return BY_ID.has(size as PanelSizeId);
+}
+
+export function isKnownCategory(category: string): category is PanelCategory {
+  return Object.prototype.hasOwnProperty.call(CATEGORY_STYLE, category);
+}
+
+/** Tiling denominations in grid units, largest first. */
+export const DENOMINATIONS_UNITS: readonly number[] = PANEL_CATALOG.map((p) => p.widthUnits).sort(
+  (a, b) => b - a,
+);
+
+/** Panel sizes indexed the same way as DENOMINATIONS_UNITS. */
+export const DENOMINATION_SIZES: readonly PanelSizeId[] = [...PANEL_CATALOG]
+  .sort((a, b) => b.widthUnits - a.widthUnits)
+  .map((p) => p.id);
+
+/** Run of a panel in grid units. */
+export function panelLengthUnits(panel: Panel): number {
+  return getPanelSpec(panel.size).widthUnits;
+}
+
+/** The grid node where the panel ends. */
+export function panelEndNode(panel: Panel): { x: number; y: number } {
+  const len = panelLengthUnits(panel);
+  return panel.orientation === 'h'
+    ? { x: panel.x + len, y: panel.y }
+    : { x: panel.x, y: panel.y + len };
+}
+
+/**
+ * The grid edges a panel occupies. Every downstream check - overlap, gaps,
+ * in-bounds, BOM aggregation - is expressed over these, which is what keeps the
+ * geometry free of floating-point tolerance bugs.
+ */
+export function panelEdges(panel: Panel): GridEdge[] {
+  const len = panelLengthUnits(panel);
+  const edges: GridEdge[] = [];
+  for (let i = 0; i < len; i++) {
+    edges.push(
+      panel.orientation === 'h'
+        ? { x: panel.x + i, y: panel.y, axis: 'h' }
+        : { x: panel.x, y: panel.y + i, axis: 'v' },
+    );
+  }
+  return edges;
+}
+
+/**
+ * The grid cells an area panel covers.
+ *
+ * Lying flat, both catalog sizes are 10 ft - five grid units - in the
+ * dimension a wall would stand up in. `orientation` says which way the
+ * panel's *width* runs; the 10 ft depth runs perpendicular to it. So a floor
+ * 4x10 laid horizontally is 2 cells wide and 5 deep.
+ */
+export function panelCells(panel: Panel): GridCell[] {
+  const spec = getPanelSpec(panel.size);
+  const widthUnits = spec.widthUnits;
+  const depthUnits = spec.heightFt / GRID_FT;
+
+  const cells: GridCell[] = [];
+  for (let i = 0; i < widthUnits; i++) {
+    for (let j = 0; j < depthUnits; j++) {
+      cells.push(
+        panel.orientation === 'h'
+          ? { x: panel.x + i, y: panel.y + j }
+          : { x: panel.x + j, y: panel.y + i },
+      );
+    }
+  }
+  return cells;
+}
+
+/** Depth of a flat-laid panel, in grid units. Five, for a 10 ft panel. */
+export const AREA_DEPTH_UNITS = WALL_HEIGHT_FT / GRID_FT;
+
+export function cellKey(cell: GridCell): string {
+  return `${cell.x},${cell.y}`;
+}
+
+/** An axis-aligned rectangle in grid units. */
+export interface UnitRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The rectangle a panel occupies in plan, in grid units.
+ *
+ * A linear panel has no thickness, so its rect is its run with zero depth; an
+ * area panel's is the block of cells it covers. Marquee selection needs one
+ * shape for both, without caring which model a category uses.
+ */
+export function panelBoundsUnits(panel: Panel): UnitRect {
+  const spec = getPanelSpec(panel.size);
+  if (isLinearCategory(panel.category)) {
+    const run = spec.widthUnits;
+    return panel.orientation === 'h'
+      ? { x: panel.x, y: panel.y, width: run, height: 0 }
+      : { x: panel.x, y: panel.y, width: 0, height: run };
+  }
+  const depth = spec.heightFt / GRID_FT;
+  return panel.orientation === 'h'
+    ? { x: panel.x, y: panel.y, width: spec.widthUnits, height: depth }
+    : { x: panel.x, y: panel.y, width: depth, height: spec.widthUnits };
+}
+
+/**
+ * Whether two rectangles touch. Inclusive at the edges, so a zero-height wall
+ * rect lying exactly on the marquee's border still counts as caught.
+ */
+export function rectsIntersect(a: UnitRect, b: UnitRect): boolean {
+  return (
+    a.x <= b.x + b.width &&
+    a.x + a.width >= b.x &&
+    a.y <= b.y + b.height &&
+    a.y + a.height >= b.y
+  );
+}
+
+export function edgeKey(edge: GridEdge): string {
+  return `${edge.x},${edge.y},${edge.axis}`;
+}
+
+export function nodeKey(x: number, y: number): string {
+  return `${x},${y}`;
+}
+
+export function flipOrientation(o: Orientation): Orientation {
+  return o === 'h' ? 'v' : 'h';
+}
+
+let idCounter = 0;
+
+/** Ids only need to be unique within a plan, and stable across undo/redo. */
+export function newPanelId(): string {
+  idCounter += 1;
+  return `p${Date.now().toString(36)}${idCounter.toString(36)}`;
+}
+
+/**
+ * What a click on `panel` should do while `brush` is armed.
+ *
+ * Returns the category to convert the panel to, or `null` to mean "this is not
+ * a conversion" - either because no brush is armed, or because the panel is not
+ * something an opening can be cut into.
+ *
+ * Both views route their clicks through this. The plan view can lean on layer
+ * hit-testing to keep an armed brush away from floors and roofs, but the 3D
+ * scene is one flat group with no layers, so the rule has to live somewhere
+ * both can share rather than being re-derived per view. An opening is a
+ * pre-cut *wall* panel, so an area panel is never a target: without this guard
+ * a door brush clicking a floor slab would turn the floor into a door.
+ */
+export function resolveOpeningClick(
+  panel: Panel | undefined,
+  brush: PanelCategory | null,
+): PanelCategory | null {
+  if (!panel || !brush) return null;
+  if (!isOpeningCategory(brush)) return null;
+  if (!isLinearCategory(panel.category)) return null;
+  // Clicking an opening with its own tool takes it back to a plain wall, so one
+  // control both applies and undoes.
+  return panel.category === brush ? 'wall' : brush;
+}
+
+/** Every category, in the order the UI should list them. */
+export const ALL_CATEGORIES = Object.keys(CATEGORY_STYLE) as PanelCategory[];
+
+/**
+ * The panels a view should draw, given the layers currently hidden.
+ *
+ * One definition for both views. The plan canvas used to filter inline and the
+ * 3D scene did not filter at all, so hiding a roof left it fully drawn - and
+ * fully clickable - in 3D. Sharing this also fixes picking for free: a panel
+ * that was never built is not in the scene's pick map, so it cannot be selected
+ * or converted by an opening brush.
+ *
+ * Hiding is a *view* control. These panels are still in the plan, still
+ * validated and still counted in the BOM: a hidden roof is one you cannot see,
+ * not one you are not building.
+ */
+export function visiblePanels(panels: Panel[], hiddenLayers: PanelCategory[]): Panel[] {
+  if (hiddenLayers.length === 0) return panels;
+  return panels.filter((panel) => !hiddenLayers.includes(panel.category));
+}
