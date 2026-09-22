@@ -11,6 +11,7 @@ import { PricingDialog } from './components/PricingDialog';
 import { UnderlayDialog } from './components/UnderlayDialog';
 import { CalibrationBanner } from './components/CalibrationBanner';
 import { buildBom } from './core/bom';
+import { EXPORT_HIDDEN, PX_PER_UNIT, planBoundsUnits } from './canvas/view';
 import { serializePlan } from './core/plan';
 import { validatePlan } from './core/validation';
 import { toWorkOrder } from './core/workorder';
@@ -30,6 +31,9 @@ type View = 'plan' | '3d';
 // Three is a large dependency and only the 3D tab needs it, so it loads on
 // demand rather than on first paint - the same split the quote PDF uses.
 const ThreeView = lazy(() => import('./three/ThreeView'));
+
+/** Target long edge, in pixels, for the plan image embedded in exports. */
+const EXPORT_LONG_EDGE_PX = 1800;
 
 export default function App() {
   const stageRef = useRef<Konva.Stage | null>(null);
@@ -144,24 +148,51 @@ export default function App() {
   const capturePlanImage = useCallback((): string | null => {
     const stage = stageRef.current;
     if (!stage) return null;
+
+    // The grid is culled to the visible region, so it would cover only part of
+    // any other framing. Hidden for the capture and restored in `finally`.
+    const hidden = stage.find(`.${EXPORT_HIDDEN}`);
     try {
-      const content = stage.getClientRect({ skipTransform: false });
-      const padding = 24;
-      const crop =
-        Number.isFinite(content.width) && content.width > 1 && content.height > 1
-          ? {
-              x: Math.max(0, content.x - padding),
-              y: Math.max(0, content.y - padding),
-              width: Math.min(stage.width(), content.width + padding * 2),
-              height: Math.min(stage.height(), content.height + padding * 2),
-            }
-          : {};
-      return stage.toDataURL({ pixelRatio: 2, ...crop });
+      // Frame the drawing, not the viewport. Crop in screen space at the
+      // stage's *current* transform rather than moving the camera: every
+      // stroke width and label size in the scene is compensated for that
+      // scale, so capturing at a different one would render them wrong.
+      //
+      // Nothing here is clamped to the stage size, and that matters twice
+      // over. Clamping is what made the old crop collapse to the whole
+      // viewport - the opaque backdrop spans +/-100000, so `getClientRect`
+      // returned a rect far larger than the stage and the clamp handed back
+      // the entire pane, empty plot and all. It also means the capture works
+      // while the plan tab is hidden, where the pane measures zero and the
+      // stage shrinks to its 320x240 minimum; Konva re-renders the scene
+      // graph into a canvas of whatever size we ask for.
+      const box = planBoundsUnits(plan.plot, plan.panels);
+      const scale = stage.scaleX() || 1;
+      const width = (box.maxX - box.minX) * PX_PER_UNIT * scale;
+      const height = (box.maxY - box.minY) * PX_PER_UNIT * scale;
+      if (!(width > 1 && height > 1)) return null;
+
+      // Zoomed out, that region can be only a few hundred pixels across, so
+      // resolution comes from the pixel ratio. It scales everything equally,
+      // which is why it cannot distort the drawing the way rescaling would.
+      const pixelRatio = Math.min(6, Math.max(1, EXPORT_LONG_EDGE_PX / Math.max(width, height)));
+
+      hidden.forEach((node) => node.visible(false));
+      return stage.toDataURL({
+        x: box.minX * PX_PER_UNIT * scale + stage.x(),
+        y: box.minY * PX_PER_UNIT * scale + stage.y(),
+        width,
+        height,
+        pixelRatio,
+      });
     } catch (error) {
       console.warn('Could not capture the plan drawing.', error);
       return null;
+    } finally {
+      hidden.forEach((node) => node.visible(true));
+      stage.batchDraw();
     }
-  }, []);
+  }, [plan.plot, plan.panels]);
 
   /**
    * Hand a text export to the user by whichever route the host allows: a file

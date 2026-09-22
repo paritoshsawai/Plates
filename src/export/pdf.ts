@@ -88,12 +88,28 @@ export function buildQuotePdf({ plan, bom, priceConfig, validation, planImage }:
   }
 
   if (planImage) {
-    const imageWidth = pageWidth - MARGIN * 2;
+    // Fit inside the box, preserving the aspect ratio. Clamping the height
+    // while leaving the width at full bleed - which is what this did - squashes
+    // a tall plan horizontally, so a narrow deep building came out looking like
+    // a different building.
+    const boxWidth = pageWidth - MARGIN * 2;
+    const boxHeight = 105;
     const props = doc.getImageProperties(planImage);
-    const imageHeight = Math.min(105, (props.height / props.width) * imageWidth);
-    doc.addImage(planImage, 'PNG', MARGIN, y, imageWidth, imageHeight, undefined, 'FAST');
+    const aspect = props.width / props.height;
+
+    let imageWidth = boxWidth;
+    let imageHeight = imageWidth / aspect;
+    if (imageHeight > boxHeight) {
+      imageHeight = boxHeight;
+      imageWidth = imageHeight * aspect;
+    }
+    // Centre what is narrower than the page, so the drawing does not sit off
+    // to one side of its own frame.
+    const imageX = MARGIN + (boxWidth - imageWidth) / 2;
+
+    doc.addImage(planImage, 'PNG', imageX, y, imageWidth, imageHeight, undefined, 'FAST');
     doc.setDrawColor(200);
-    doc.rect(MARGIN, y, imageWidth, imageHeight);
+    doc.rect(imageX, y, imageWidth, imageHeight);
     y += imageHeight + 8;
   }
 

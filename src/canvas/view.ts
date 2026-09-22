@@ -6,11 +6,25 @@
  * shape below can be drawn in plain world coordinates.
  */
 
-import type { GridEdge, GridPoint } from '../core/types';
+import { plotBboxUnits } from '../core/plot';
+import { panelBoundsUnits } from '../core/panels';
+import type { GridEdge, GridPoint, Panel, Plot } from '../core/types';
 
 export const PX_PER_UNIT = 24;
+/** Konva name for nodes an export must leave out. */
+export const EXPORT_HIDDEN = 'export-hidden';
+
 /** Drawn wall thickness in world pixels. Panels are modelled with no thickness. */
 export const WALL_PX = 9;
+/**
+ * Margin an export leaves around the drawing, in grid units.
+ *
+ * Derived from the dimension labels rather than picked by eye: a vertical run's
+ * label is drawn in a 72 px box starting WALL_PX to the right of the wall, so
+ * anything less clips the furthest label - which is exactly what a 1 unit
+ * margin did, cutting "20 ft" down to "20".
+ */
+export const EXPORT_MARGIN_UNITS = (72 + WALL_PX) / PX_PER_UNIT;
 export const MIN_SCALE = 0.2;
 export const MAX_SCALE = 6;
 
@@ -144,4 +158,60 @@ export function snapToGrid(this: { getStage(): { scaleX(): number; x(): number; 
   const snap = (screen: number, origin: number) =>
     Math.round((screen - origin) / scale / PX_PER_UNIT) * PX_PER_UNIT * scale + origin;
   return { x: snap(pos.x, originX), y: snap(pos.y, originY) };
+}
+
+/**
+ * The world region an exported drawing should cover.
+ *
+ * Derived from the plan, never from the viewport. An export that framed
+ * whatever the architect happened to be looking at would depend on their
+ * scroll position, their zoom, their window size and even which tab was open -
+ * which is exactly how a quote ended up showing an empty corner of the plot
+ * with the building half out of frame.
+ *
+ * It frames the *panels* once anything is drawn, not the plot. A quote is
+ * about the building: on a parcel much larger than the house, framing the plot
+ * leaves the subject a small shape in one corner and most of the page bare
+ * land. The plot boundary is still drawn and still appears whenever it is near
+ * the building; on a big parcel it simply runs off the edge, which is what
+ * zoom-to-contents does in any drawing tool. An empty plan has nothing to
+ * frame but the plot, so it gets the plot.
+ */
+export function planBoundsUnits(
+  plot: Plot,
+  panels: Panel[],
+  padUnits = EXPORT_MARGIN_UNITS,
+): { minX: number; minY: number; maxX: number; maxY: number } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const panel of panels) {
+    const rect = panelBoundsUnits(panel);
+    minX = Math.min(minX, rect.x);
+    minY = Math.min(minY, rect.y);
+    maxX = Math.max(maxX, rect.x + rect.width);
+    maxY = Math.max(maxY, rect.y + rect.height);
+  }
+
+  if (!Number.isFinite(minX)) {
+    const box = plotBboxUnits(plot);
+    minX = box.minX;
+    minY = box.minY;
+    maxX = box.maxX;
+    maxY = box.maxY;
+  }
+
+  // A single panel is a line with no thickness, and a degenerate plot has no
+  // area at all. Either way the capture needs a box with real extent.
+  if (!(maxX > minX) || !(maxY > minY)) {
+    return { minX: minX - 1, minY: minY - 1, maxX: maxX + 1, maxY: maxY + 1 };
+  }
+  return {
+    minX: minX - padUnits,
+    minY: minY - padUnits,
+    maxX: maxX + padUnits,
+    maxY: maxY + padUnits,
+  };
 }

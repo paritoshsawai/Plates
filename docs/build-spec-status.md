@@ -98,6 +98,15 @@ satisfies the item.
   enforced inside `commit` rather than at each creation site, so a path added later cannot forget
   it and leave the user with a tool that looks dead.
 
+- **An exported drawing is framed from the plan, not from the viewport.** It used to crop to
+  `stage.getClientRect()` clamped to the stage, which silently degenerated to the whole pane: the
+  opaque export backdrop spans +/-100000, so the rect was always larger than the stage and the
+  clamp handed back everything, bare plot included. Worse, exporting while the plan tab was hidden
+  captured a 320x240 stage - the pane measures zero when hidden, and that is the clamped minimum -
+  so the quote carried a 640x480 sliver of the drawing. The capture now derives its region from the
+  panels, at the stage's current transform so stroke widths and label sizes stay correct, with a
+  margin derived from the dimension-label geometry rather than guessed.
+
 ## Still not built
 
 Multi-storey stacking · DXF export and factory view · branded client-shareable quote links ·
@@ -125,7 +134,7 @@ modelling one.
 
 ## Test coverage
 
-307 unit tests across `core/`, `state/`, `three/` and `canvas/view.ts`, plus a Playwright drive of the built app that
+316 unit tests across `core/`, `state/`, `three/` and `canvas/view.ts`, plus a Playwright drive of the built app that
 exercises drawing, selection, deletion, undo, the placement guards, pricing, all five exports, save
 and reopen, and the read-only client view. Drawing a 20 × 16 ft room in the browser produces the
 same 18 panels / 72 linear ft the unit tests assert.

@@ -11,7 +11,7 @@ length is a multiple of 2 ft tiles exactly with zero offcut, and nothing else ca
 ```bash
 npm install
 npm run dev       # http://localhost:5173
-npm test          # 307 unit tests over the geometry, tiling, BOM, pricing, store and 3D
+npm test          # 316 unit tests over the geometry, tiling, BOM, pricing, store and 3D
 npm run build     # typecheck + production bundle
 npm run stage:artifact   # stage dist/ for publishing, with an asset-reference check
 ```
@@ -37,7 +37,8 @@ npm run stage:artifact   # stage dist/ for publishing, with an asset-reference c
 7. **Work in 3D too.** The 3D tab is not read-only: arm Door or Window and click a wall to convert
    it in place, exactly as in the plan, and click it again to turn it back.
 8. **Export.** Quote PDF, plan PNG, BOM CSV, plan JSON, and a work-order JSON payload shaped for an
-   ERP.
+   ERP. The drawing in an export is framed from the plan itself, so it does not depend on where you
+   happened to be scrolled, how far you were zoomed, or which tab was open.
 
 ## The model
 
