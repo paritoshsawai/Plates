@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Layer, Rect, Stage } from 'react-konva';
+import { Group, Layer, Rect, Stage } from 'react-konva';
 import type Konva from 'konva';
 import { GridLayer } from './GridLayer';
 import { PlotShape } from './PlotShape';
@@ -15,7 +15,16 @@ import {
   UncoveredArea,
   WallPreview,
 } from './Annotations';
-import { COLORS, PX_PER_UNIT, fitToBox, nearestEdge, nearestNode, visibleUnits, zoomAt } from './view';
+import {
+  COLORS,
+  EXPORT_HIDDEN,
+  PX_PER_UNIT,
+  fitToBox,
+  nearestEdge,
+  nearestNode,
+  visibleUnits,
+  zoomAt,
+} from './view';
 import type { Viewport } from './view';
 import { plotBboxUnits } from '../core/plot';
 import { isInsidePlot, wouldOverlap } from '../core/validation';
@@ -376,10 +385,15 @@ export function DesignCanvas({ validation, stageRef }: Props) {
           {/* The scan goes under the grid: it is something to trace, not part
               of the drawing. */}
           <UnderlayLayer underlay={plan.underlay} />
-          <GridLayer
-            bounds={visibleUnits(viewport, size.width, size.height)}
-            scale={viewport.scale}
-          />
+          {/* Named so the export can hide it. The grid is culled to the
+              visible region, so at any other framing it would be drawn over
+              only part of the picture - and a quote reads better without it. */}
+          <Group name={EXPORT_HIDDEN}>
+            <GridLayer
+              bounds={visibleUnits(viewport, size.width, size.height)}
+              scale={viewport.scale}
+            />
+          </Group>
           <PlotShape plot={plan.plot} scale={viewport.scale} />
         </Layer>
 

@@ -98,6 +98,23 @@ satisfies the item.
   enforced inside `commit` rather than at each creation site, so a path added later cannot forget
   it and leave the user with a tool that looks dead.
 
+- **An exported drawing is framed from the plan, not from the viewport.** It used to crop to
+  `stage.getClientRect()` clamped to the stage, which silently degenerated to the whole pane: the
+  opaque export backdrop spans +/-100000, so the rect was always larger than the stage and the
+  clamp handed back everything, bare plot included. Worse, exporting while the plan tab was hidden
+  captured a 320x240 stage - the pane measures zero when hidden, and that is the clamped minimum -
+  so the quote carried a 640x480 sliver of the drawing. The capture now derives its region from the
+  panels, at the stage's current transform so stroke widths and label sizes stay correct, with a
+  margin derived from the dimension-label geometry rather than guessed.
+
+- **The quote PDF paginates, and its tests assert position rather than presence.** It used to walk
+  one `y` cursor down the page with no page-height check at all; jsPDF neither clips nor paginates,
+  so a bill of materials covering every category ran to roughly 380 mm on a 297 mm sheet. The grand
+  total was written into the file at a *negative* coordinate and never appeared on the paper -
+  quotes went out with no price on them. Because that text is still in the content stream, a test
+  asserting the document "contains the total" passes on a document nobody can read it in, so the
+  tests extract each string with its coordinates and assert nothing lands outside the page.
+
 ## Still not built
 
 Multi-storey stacking · DXF export and factory view · branded client-shareable quote links ·
@@ -125,7 +142,7 @@ modelling one.
 
 ## Test coverage
 
-307 unit tests across `core/`, `state/`, `three/` and `canvas/view.ts`, plus a Playwright drive of the built app that
+331 unit tests across `core/`, `state/`, `three/` and `canvas/view.ts`, plus a Playwright drive of the built app that
 exercises drawing, selection, deletion, undo, the placement guards, pricing, all five exports, save
 and reopen, and the read-only client view. Drawing a 20 × 16 ft room in the browser produces the
 same 18 panels / 72 linear ft the unit tests assert.
