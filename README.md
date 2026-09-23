@@ -11,7 +11,7 @@ length is a multiple of 2 ft tiles exactly with zero offcut, and nothing else ca
 ```bash
 npm install
 npm run dev       # http://localhost:5173
-npm test          # 316 unit tests over the geometry, tiling, BOM, pricing, store and 3D
+npm test          # 331 unit tests over the geometry, tiling, BOM, pricing, store, 3D and exports
 npm run build     # typecheck + production bundle
 npm run stage:artifact   # stage dist/ for publishing, with an asset-reference check
 ```
