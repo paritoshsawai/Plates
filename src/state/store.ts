@@ -5,6 +5,7 @@ import { isLinearCategory, isOpeningCategory } from '../core/types';
 import { normalizePlot } from '../core/plot';
 import { canPlace } from '../core/validation';
 import { tileRun } from '../core/tiling';
+import { tileRoom } from '../core/room';
 import { bestTileFootprint, tileFootprint } from '../core/areaTiling';
 import { interiorCells } from '../core/footprint';
 import { GRID_FT } from '../core/units';
@@ -29,7 +30,7 @@ import {
 } from './storage';
 import type { PlanSummary } from './storage';
 
-export type Tool = 'select' | 'wall' | 'panel';
+export type Tool = 'select' | 'wall' | 'panel' | 'room';
 
 /**
  * Who is using the tool. This is a UI affordance, not access control - it
@@ -118,6 +119,7 @@ export interface AppState {
   toggleLayer(category: PanelCategory): void;
   showAllLayers(): void;
   autoFillRun(from: { x: number; y: number }, to: { x: number; y: number }): void;
+  buildRoom(from: GridPoint, to: GridPoint): void;
   movePanel(id: string, x: number, y: number): void;
   rotateSelection(): void;
   nudgeSelection(dx: number, dy: number): void;
@@ -436,6 +438,23 @@ export const useStore = create<AppState>()((set, get) => {
       const panels = tileRun(start.x, start.y, lengthUnits, orientation, get().activeCategory);
       if (!panels) {
         get().notify('That run cannot be built from 4 ft and 2 ft panels.', 'error');
+        return;
+      }
+      commit((doc) => ({ ...doc, panels: [...doc.panels, ...panels] }));
+      set({ wallAnchor: null });
+    },
+
+    /**
+     * Four walls from two opposite corners, in one undoable step.
+     *
+     * One commit rather than four calls to `autoFillRun`, so an accidental
+     * room is one undo away rather than four, and so a room that cannot be
+     * built leaves nothing half-drawn behind.
+     */
+    buildRoom: (from, to) => {
+      const panels = tileRoom(from, to, get().activeCategory);
+      if (!panels) {
+        get().notify('A room needs a width and a depth. Drag out a rectangle.', 'error');
         return;
       }
       commit((doc) => ({ ...doc, panels: [...doc.panels, ...panels] }));

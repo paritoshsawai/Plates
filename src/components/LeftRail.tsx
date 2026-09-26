@@ -10,7 +10,8 @@ import type { PanelCategory } from '../core/types';
 import { GRID_FT, WALL_HEIGHT_FT, formatArea, formatLength } from '../core/units';
 import { plotAreaSqFt, plotEdgeLengthsFt } from '../core/plot';
 import { useStore } from '../state/store';
-import { Button, SectionTitle } from './ui';
+import { useCoarsePointer } from './useMediaQuery';
+import { Button, CollapsibleSection, SectionTitle } from './ui';
 
 interface Props {
   onEditPlot(): void;
@@ -27,6 +28,7 @@ interface Props {
 }
 
 export function LeftRail({ onEditPlot, onEditUnderlay, only }: Props) {
+  const touch = useCoarsePointer();
   const showDraw = only !== 'layers';
   const showLayers = only !== 'draw';
   const tool = useStore((s) => s.tool);
@@ -74,11 +76,26 @@ export function LeftRail({ onEditPlot, onEditUnderlay, only }: Props) {
         <SectionTitle>Tools</SectionTitle>
         <div className="grid gap-1.5">
           <ToolButton
+            active={tool === 'room'}
+            disabled={readOnly}
+            onClick={() => setTool('room')}
+            label="Draw room"
+            hint={
+              touch
+                ? 'Drag out a rectangle and all four walls are built at once.'
+                : 'Drag out a rectangle, or click two opposite corners. All four walls are built at once.'
+            }
+          />
+          <ToolButton
             active={tool === 'wall'}
             disabled={readOnly}
             onClick={() => setTool('wall')}
             label="Draw wall"
-            hint="Click two points; the run is auto-filled with the fewest panels."
+            hint={
+              touch
+                ? 'Drag from one end to the other. The ring shows where it will land.'
+                : 'Click two points, or drag from one end to the other; the run is auto-filled with the fewest panels.'
+            }
           />
           <ToolButton
             active={tool === 'panel'}
@@ -91,7 +108,11 @@ export function LeftRail({ onEditPlot, onEditUnderlay, only }: Props) {
             active={tool === 'select'}
             onClick={() => setTool('select')}
             label="Select & move"
-            hint="Drag a panel to move it, or drag the background to box-select. Hold Space to pan."
+            hint={
+              touch
+                ? 'Tap a panel to select it. Hold one down for more, including delete.'
+                : 'Drag a panel to move it, or drag the background to box-select. Hold Space to pan.'
+            }
           />
         </div>
       </section>
@@ -165,55 +186,7 @@ export function LeftRail({ onEditPlot, onEditUnderlay, only }: Props) {
       </section>
       )}
 
-      {showLayers && (
-      <section>
-        <SectionTitle>Layers</SectionTitle>
-        <div className="grid gap-1">
-          {ALL_CATEGORIES.map((category) => {
-            const count = countIn(category);
-            const hidden = hiddenLayers.includes(category);
-            return (
-              <button
-                key={category}
-                type="button"
-                onClick={() => toggleLayer(category)}
-                aria-pressed={!hidden}
-                // Names the action, not the state, which is what a toggle button
-                // should announce - and keeps it distinct from the strip buttons.
-                aria-label={`${hidden ? 'Show' : 'Hide'} ${CATEGORY_STYLE[category].plural}`}
-                className={`flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition hover:bg-slate-50 ${
-                  hidden ? 'text-slate-400' : 'text-slate-700'
-                }`}
-              >
-                <span
-                  className="h-3 w-3 shrink-0 rounded-sm"
-                  style={{
-                    backgroundColor: CATEGORY_STYLE[category].color,
-                    opacity: hidden ? 0.3 : 1,
-                  }}
-                />
-                <span className="flex-1">{CATEGORY_STYLE[category].plural}</span>
-                <span className="tabular-nums text-xs text-slate-400">{count}</span>
-                <span className="w-10 shrink-0 text-right text-xs font-medium">
-                  {hidden ? 'Show' : 'Hide'}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        {hiddenLayers.length > 0 && (
-          <div className="mt-1.5">
-            <Button variant="ghost" onClick={showAllLayers}>
-              Show all layers
-            </Button>
-          </div>
-        )}
-        <p className="mt-2 text-xs leading-snug text-slate-500">
-          Hiding is a view control only. A hidden layer is still built, still validated and still
-          priced &mdash; it just gets out of the way so you can see underneath.
-        </p>
-      </section>
-      )}
+
 
       {!readOnly && showLayers && (
         <section>
@@ -371,6 +344,58 @@ export function LeftRail({ onEditPlot, onEditUnderlay, only }: Props) {
           </div>
         )}
       </section>
+      )}
+      {showLayers && (
+        <CollapsibleSection
+          title="Layers"
+          summary={hiddenLayers.length > 0 ? `${hiddenLayers.length} hidden` : 'all shown'}
+        >
+          <div className="grid gap-1">
+            {ALL_CATEGORIES.map((category) => {
+              const count = countIn(category);
+              const hidden = hiddenLayers.includes(category);
+              return (
+                <button
+                  key={category}
+                  type="button"
+                  onClick={() => toggleLayer(category)}
+                  aria-pressed={!hidden}
+                  // Names the action, not the state, which is what a toggle
+                  // button should announce - and keeps it distinct from the
+                  // strip buttons.
+                  aria-label={`${hidden ? 'Show' : 'Hide'} ${CATEGORY_STYLE[category].plural}`}
+                  className={`flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition hover:bg-slate-50 ${
+                    hidden ? 'text-slate-400' : 'text-slate-700'
+                  }`}
+                >
+                  <span
+                    className="h-3 w-3 shrink-0 rounded-sm"
+                    style={{
+                      backgroundColor: CATEGORY_STYLE[category].color,
+                      opacity: hidden ? 0.3 : 1,
+                    }}
+                  />
+                  <span className="flex-1">{CATEGORY_STYLE[category].plural}</span>
+                  <span className="tabular-nums text-xs text-slate-400">{count}</span>
+                  <span className="w-10 shrink-0 text-right text-xs font-medium">
+                    {hidden ? 'Show' : 'Hide'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {hiddenLayers.length > 0 && (
+            <div className="mt-1.5">
+              <Button variant="ghost" onClick={showAllLayers}>
+                Show all layers
+              </Button>
+            </div>
+          )}
+          <p className="mt-2 text-xs leading-snug text-slate-500">
+            Hiding is a view control only. A hidden layer is still built, still validated and still
+            priced &mdash; it just gets out of the way so you can see underneath.
+          </p>
+        </CollapsibleSection>
       )}
     </aside>
   );

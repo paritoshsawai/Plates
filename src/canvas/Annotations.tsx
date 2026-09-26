@@ -314,3 +314,101 @@ export function BrushPreview({ edge, size, category, scale }: BrushProps) {
     />
   );
 }
+
+/**
+ * The room tool's live rectangle: four runs, their dimensions and the panel
+ * count, before anything is committed.
+ */
+export function RoomPreview({
+  start,
+  end,
+  category,
+  scale,
+  unit,
+}: {
+  start: GridPoint | null;
+  end: GridPoint | null;
+  category: PanelCategory;
+  scale: number;
+  unit: LengthUnit;
+}) {
+  if (!start || !end) return null;
+  const minX = Math.min(start.x, end.x);
+  const maxX = Math.max(start.x, end.x);
+  const minY = Math.min(start.y, end.y);
+  const maxY = Math.max(start.y, end.y);
+  const widthUnits = maxX - minX;
+  const depthUnits = maxY - minY;
+  if (widthUnits === 0 || depthUnits === 0) return null;
+
+  const colour = categoryColor(category);
+  const fontSize = Math.max(9, 12 / scale);
+  const panels =
+    2 * ((minPanelCount(widthUnits) ?? 0) + (minPanelCount(depthUnits) ?? 0));
+
+  return (
+    <>
+      <Rect
+        x={minX * PX_PER_UNIT}
+        y={minY * PX_PER_UNIT}
+        width={widthUnits * PX_PER_UNIT}
+        height={depthUnits * PX_PER_UNIT}
+        fill={colour}
+        opacity={0.12}
+        stroke={colour}
+        strokeWidth={Math.max(2, WALL_PX / 2 / scale)}
+        listening={false}
+      />
+      <Text
+        x={(minX + widthUnits / 2) * PX_PER_UNIT - 90}
+        y={minY * PX_PER_UNIT - fontSize * 2}
+        width={180}
+        align="center"
+        text={`${formatLength(unitsToFt(widthUnits), unit)} × ${formatLength(
+          unitsToFt(depthUnits),
+          unit,
+        )} · ${panels} panels`}
+        fontSize={fontSize}
+        fontStyle="bold"
+        fontFamily="ui-monospace, monospace"
+        fill={COLORS.anchor}
+        stroke="#ffffff"
+        strokeWidth={Math.max(2, 3 / scale)}
+        fillAfterStrokeEnabled
+        listening={false}
+      />
+    </>
+  );
+}
+
+/**
+ * A ring on the grid node a press will actually land on.
+ *
+ * The fix for the complaint that started this: on a phone one 2 ft step can be
+ * a handful of pixels, so a fingertip covers several of them and you cannot
+ * tell which one you are about to take. Showing the answer, large, before the
+ * finger lifts turns guesswork into aiming.
+ */
+export function SnapRing({ node, scale }: { node: GridPoint | null; scale: number }) {
+  if (!node) return null;
+  const radius = Math.max(9, 14 / scale);
+  return (
+    <>
+      <Circle
+        x={node.x * PX_PER_UNIT}
+        y={node.y * PX_PER_UNIT}
+        radius={radius}
+        stroke={COLORS.anchor}
+        strokeWidth={Math.max(1.5, 2.5 / scale)}
+        listening={false}
+      />
+      <Circle
+        x={node.x * PX_PER_UNIT}
+        y={node.y * PX_PER_UNIT}
+        radius={Math.max(2, 3 / scale)}
+        fill={COLORS.anchor}
+        listening={false}
+      />
+    </>
+  );
+}

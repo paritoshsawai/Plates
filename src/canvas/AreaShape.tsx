@@ -9,6 +9,8 @@ interface Props {
   flagged: boolean;
   draggable: boolean;
   onSelect(id: string, additive: boolean): void;
+  /** Touch only: the finger rested here, so offer the per-panel actions. */
+  onHold?(id: string): void;
   onMoved(id: string, x: number, y: number): void;
 }
 
@@ -19,7 +21,7 @@ interface Props {
  * the wall line - which is what the architect is actually drawing - stays the
  * thing you read first.
  */
-export function AreaShape({ panel, selected, flagged, draggable, onSelect, onMoved }: Props) {
+export function AreaShape({ panel, selected, flagged, draggable, onSelect, onHold, onMoved }: Props) {
   const spec = getPanelSpec(panel.size);
   const widthUnits = panel.orientation === 'h' ? spec.widthUnits : AREA_DEPTH_UNITS;
   const heightUnits = panel.orientation === 'h' ? AREA_DEPTH_UNITS : spec.widthUnits;
@@ -36,7 +38,10 @@ export function AreaShape({ panel, selected, flagged, draggable, onSelect, onMov
       strokeWidth={selected ? 2.5 : 1}
       draggable={draggable}
       dragBoundFunc={snapToGrid}
-      {...selectHandlers((additive) => onSelect(panel.id, additive))}
+      {...selectHandlers(
+        (additive) => onSelect(panel.id, additive),
+        onHold ? () => onHold(panel.id) : undefined,
+      )}
       onDragEnd={(e) => {
         const node = e.target;
         onMoved(panel.id, Math.round(node.x() / PX_PER_UNIT), Math.round(node.y() / PX_PER_UNIT));

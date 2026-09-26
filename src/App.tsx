@@ -154,6 +154,7 @@ export default function App() {
       if (e.key === '1') state.setTool('wall');
       if (e.key === '2') state.setTool('panel');
       if (e.key === '3') state.setTool('select');
+      if (e.key === '4') state.setTool('room');
     };
 
     window.addEventListener('keydown', onKeyDown);

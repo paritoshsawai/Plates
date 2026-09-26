@@ -244,7 +244,11 @@ export function planBoundsUnits(
  * mouse-only affordance; a tap replaces the selection, which is what a tap
  * means everywhere else.
  */
-export function selectHandlers(onPick: (additive: boolean) => void) {
+export function selectHandlers(
+  onPick: (additive: boolean) => void,
+  /** Called when a finger rests on the shape, for the touch-only actions. */
+  onHold?: () => void,
+) {
   // A touchscreen fires a compatibility mousedown after every touchstart. For a
   // plain select that is merely redundant, but the same handler converts a wall
   // into a door and back, so a doubled call would undo itself.
@@ -256,5 +260,30 @@ export function selectHandlers(onPick: (additive: boolean) => void) {
     e.cancelBubble = true;
     onPick('shiftKey' in e.evt && e.evt.shiftKey);
   };
-  return { onMouseDown: pick, onTouchStart: pick };
+  if (!onHold) return { onMouseDown: pick, onTouchStart: pick };
+
+  // Long press. A finger has no right-click and no hover, so holding is the
+  // only gesture left for "more about this one". Cancelled by movement or by
+  // lifting, so a drag to move a panel never turns into a menu.
+  const HOLD_MS = 500;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const cancelHold = () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
+
+  return {
+    onMouseDown: pick,
+    onTouchStart: (e: { cancelBubble: boolean; evt: MouseEvent | TouchEvent }) => {
+      pick(e);
+      cancelHold();
+      timer = setTimeout(() => {
+        timer = null;
+        onHold();
+      }, HOLD_MS);
+    },
+    onTouchMove: cancelHold,
+    onTouchEnd: cancelHold,
+    onDragStart: cancelHold,
+  };
 }
