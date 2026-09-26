@@ -17,6 +17,10 @@ import {
 } from './controls';
 import type { Orbit } from './controls';
 import { useStore } from '../state/store';
+import { midpoint, pinchFactor, pointerDistance } from '../core/gestures';
+import { useCoarsePointer } from '../components/useMediaQuery';
+import { AreaReadout } from '../components/AreaReadout';
+import type { PlanAreas } from '../components/AreaReadout';
 import { CATEGORY_STYLE, resolveOpeningClick, visiblePanels } from '../core/panels';
 import type { Panel } from '../core/types';
 
@@ -42,7 +46,7 @@ function cloneOrbit(orbit: Orbit): Orbit {
   return { ...orbit, target: orbit.target.clone() };
 }
 
-export default function ThreeView() {
+export default function ThreeView({ areas }: { areas: PlanAreas }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const allPanels = useStore((s) => s.plan.panels);
   const hiddenLayers = useStore((s) => s.hiddenLayers);
@@ -55,6 +59,8 @@ export default function ThreeView() {
   const selection = useStore((s) => s.selection);
   const select = useStore((s) => s.select);
   const openingBrush = useStore((s) => s.openingBrush);
+  const unit = useStore((s) => s.unit);
+  const coarsePointer = useCoarsePointer();
   const setPanelCategory = useStore((s) => s.setPanelCategory);
 
   // Kept in refs so the render loop is set up once and never torn down by a
@@ -192,6 +198,60 @@ export default function ThreeView() {
     let travelled = 0;
     const CLICK_SLOP_PX = 5;
 
+    /**
+     * Every finger currently down, by pointer id.
+     *
+     * The single `activePointer` above is enough for a mouse, which only ever
+     * has one. A touchscreen routinely has two, and without tracking both
+     * there is no pinch - which left the 3D view spinnable but impossible to
+     * zoom or pan on a phone.
+     */
+    const pointers = new Map<number, { x: number; y: number }>();
+    let pinch: { distance: number; mid: { x: number; y: number } } | null = null;
+
+    /**
+     * Two fingers: pinch to dolly, move to pan, in one gesture.
+     *
+     * Spreading the fingers should bring the building closer, so the radius
+     * takes the *inverse* of the span ratio. The dolly is anchored on the
+     * midpoint through the same `cursorAnchor` the wheel uses, so the point
+     * between the fingers stays put, and the midpoint's own travel is applied
+     * as a pan through the same `panTarget` a right-drag uses.
+     */
+    const handlePinch = () => {
+      const [a, b] = [...pointers.values()];
+      if (!a || !b) return;
+
+      const distance = pointerDistance(a, b);
+      const mid = midpoint(a, b);
+      const previous = pinch;
+      pinch = { distance, mid };
+      if (!previous) return;
+
+      touchedRef.current = true;
+      travelled += CLICK_SLOP_PX + 1; // A pinch is never also a tap.
+
+      const desired = desiredRef.current;
+      const rect = renderer.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((mid.x - rect.left) / rect.width) * 2 - 1,
+        -((mid.y - rect.top) / rect.height) * 2 + 1,
+      );
+
+      const factor = 1 / pinchFactor(previous.distance, distance);
+      const clamped = clampRadius(desired.radius * factor) / desired.radius;
+      dollyAboutPoint(desired, cursorAnchor(syncAim(), ndc, desired.target), clamped);
+
+      panTarget(
+        syncAim(),
+        desired.target,
+        mid.x - previous.mid.x,
+        mid.y - previous.mid.y,
+        panWorldPerPixel(desired.radius, FOV_DEGREES, viewportHeightPx),
+      );
+      invalidate();
+    };
+
     const endDrag = () => {
       if (activePointer !== null) {
         try {
@@ -204,13 +264,31 @@ export default function ThreeView() {
       activePointer = null;
     };
 
+    const forgetPointer = (e: PointerEvent) => {
+      pointers.delete(e.pointerId);
+      // The surviving finger would otherwise carry the old two-finger span
+      // into its next move and jump the camera.
+      if (pointers.size < 2) pinch = null;
+    };
+
     const onPointerDown = (e: PointerEvent) => {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size >= 2) {
+        // A second finger turns the gesture into a pinch. Drop the one-finger
+        // orbit, or the camera would spin while the user is only zooming.
+        endDrag();
+        pinch = null;
+        return;
+      }
+
       // Right and middle button pan, as in every CAD tool; shift-drag does too,
       // for trackpads with no second button.
       const mode = e.button === 2 || e.button === 1 || e.shiftKey ? 'pan' : 'orbit';
       // Keeps a drag from also starting a text selection on the page, which
-      // leaves the cursor stuck in an I-beam and the drag feeling gritty.
-      e.preventDefault();
+      // leaves the cursor stuck in an I-beam and the drag feeling gritty. Only
+      // for a mouse: on touch, preventing the default here also cancels the
+      // synthetic click, and tapping a wall to place a door would stop working.
+      if (e.pointerType === 'mouse') e.preventDefault();
       try {
         renderer.domElement.setPointerCapture(e.pointerId);
         activePointer = e.pointerId;
@@ -228,6 +306,11 @@ export default function ThreeView() {
     };
 
     const onPointerMove = (e: PointerEvent) => {
+      if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size >= 2) {
+        handlePinch();
+        return;
+      }
       if (!dragging) return;
       // A release the page never saw - an alt-tab mid-drag, a devtools break -
       // leaves no button down. Treat that as the end of the drag.
@@ -321,9 +404,13 @@ export default function ThreeView() {
     element.addEventListener('contextmenu', onContextMenu);
     element.addEventListener('pointerdown', onPointerDown);
     element.addEventListener('pointermove', onPointerMove);
-    element.addEventListener('pointerup', endDrag);
-    element.addEventListener('pointercancel', endDrag);
-    element.addEventListener('lostpointercapture', endDrag);
+    const onPointerRelease = (e: PointerEvent) => {
+      forgetPointer(e);
+      endDrag();
+    };
+    element.addEventListener('pointerup', onPointerRelease);
+    element.addEventListener('pointercancel', onPointerRelease);
+    element.addEventListener('lostpointercapture', onPointerRelease);
     element.addEventListener('wheel', onWheel, { passive: false });
     element.addEventListener('click', onClick);
 
@@ -381,9 +468,9 @@ export default function ThreeView() {
       observer.disconnect();
       element.removeEventListener('pointerdown', onPointerDown);
       element.removeEventListener('pointermove', onPointerMove);
-      element.removeEventListener('pointerup', endDrag);
-      element.removeEventListener('pointercancel', endDrag);
-      element.removeEventListener('lostpointercapture', endDrag);
+      element.removeEventListener('pointerup', onPointerRelease);
+      element.removeEventListener('pointercancel', onPointerRelease);
+      element.removeEventListener('lostpointercapture', onPointerRelease);
       element.removeEventListener('wheel', onWheel);
       element.removeEventListener('click', onClick);
       element.removeEventListener('contextmenu', onContextMenu);
@@ -471,12 +558,19 @@ export default function ThreeView() {
         ))}
       </div>
 
-      <p className="pointer-events-none absolute inset-x-0 bottom-0 p-3 text-center text-xs text-slate-500">
-        Drag to orbit &middot; right-drag, middle-drag or shift-drag to pan &middot; scroll to zoom
-        at the cursor &middot;{' '}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col items-center gap-1.5 p-3 pb-16 text-xs lg:pb-3">
+        <AreaReadout areas={areas} unit={unit} />
+      </div>
+
+      <p className="pointer-events-none absolute inset-x-0 bottom-24 p-3 text-center text-xs text-slate-500 lg:bottom-10">
+        {coarsePointer
+          ? 'Drag to orbit \u00b7 two fingers to pan \u00b7 pinch to zoom \u00b7 '
+          : 'Drag to orbit \u00b7 right-drag, middle-drag or shift-drag to pan \u00b7 scroll to zoom at the cursor \u00b7 '}
         {openingBrush
-          ? `click a wall to turn it into a ${CATEGORY_STYLE[openingBrush].label.toLowerCase()}`
-          : 'click a panel to select it'}
+          ? `${coarsePointer ? 'tap' : 'click'} a wall to turn it into a ${CATEGORY_STYLE[
+              openingBrush
+            ].label.toLowerCase()}`
+          : `${coarsePointer ? 'tap' : 'click'} a panel to select it`}
       </p>
       {panels.length === 0 && (
         <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-500">

@@ -13,6 +13,27 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/*
+ * A finger needs about 44 px; the desktop controls are about 30 px and should
+ * stay that way. Keyed to the pointer rather than the width, because a 13-inch
+ * tablet and a 13-inch laptop want opposite answers at the same size.
+ */
+@media (pointer: coarse) {
+  button,
+  select,
+  [role='button'],
+  /* Not by type: the plan-name field carries no type attribute at all, and
+     an `input[type='text']` selector silently skips it. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']) {
+    min-height: 44px;
+  }
+}
+
+/* A pan must not also drag the page out from under itself. */
+body {
+  overscroll-behavior: none;
+}
+
 /* Konva mounts its own canvas; keep it from inheriting a text baseline gap. */
 .konvajs-content {
   display: block;

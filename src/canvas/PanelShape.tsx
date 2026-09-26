@@ -2,7 +2,7 @@ import { Arc, Group, Line, Rect } from 'react-konva';
 import { categoryColor, getPanelSpec } from '../core/panels';
 import { isOpeningCategory } from '../core/types';
 import type { Panel } from '../core/types';
-import { COLORS, PX_PER_UNIT, WALL_PX, snapToGrid } from './view';
+import { COLORS, PX_PER_UNIT, WALL_PX, selectHandlers, snapToGrid } from './view';
 
 interface Props {
   panel: Panel;
@@ -10,13 +10,15 @@ interface Props {
   flagged: boolean;
   draggable: boolean;
   onSelect(id: string, additive: boolean): void;
+  /** Touch only: the finger rested here, so offer the per-panel actions. */
+  onHold?(id: string): void;
   onMoved(id: string, x: number, y: number): void;
 }
 
 /** Extra transparent padding so a 9 px wall is still easy to grab. */
 const HIT_PAD = 7;
 
-export function PanelShape({ panel, selected, flagged, draggable, onSelect, onMoved }: Props) {
+export function PanelShape({ panel, selected, flagged, draggable, onSelect, onHold, onMoved }: Props) {
   const spec = getPanelSpec(panel.size);
   const runPx = spec.widthUnits * PX_PER_UNIT;
 
@@ -34,10 +36,10 @@ export function PanelShape({ panel, selected, flagged, draggable, onSelect, onMo
       y={panel.y * PX_PER_UNIT}
       draggable={draggable}
       dragBoundFunc={snapToGrid}
-      onMouseDown={(e) => {
-        e.cancelBubble = true;
-        onSelect(panel.id, e.evt.shiftKey);
-      }}
+      {...selectHandlers(
+        (additive) => onSelect(panel.id, additive),
+        onHold ? () => onHold(panel.id) : undefined,
+      )}
       onDragEnd={(e) => {
         const node = e.target;
         onMoved(

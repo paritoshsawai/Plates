@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 
 export function Button({
@@ -99,12 +100,15 @@ export function Modal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 sm:items-center sm:p-4"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="max-h-full w-full max-w-lg overflow-auto rounded-xl bg-white shadow-xl">
+      <div
+        className="max-h-[92svh] w-full max-w-lg overflow-auto rounded-t-2xl bg-white shadow-xl sm:max-h-full sm:rounded-xl"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      >
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
           <h2 className="text-sm font-semibold text-slate-800">{title}</h2>
           <button
@@ -128,5 +132,51 @@ export function Modal({
 export function SectionTitle({ children }: { children: ReactNode }) {
   return (
     <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{children}</h3>
+  );
+}
+
+/**
+ * A section that folds away, for the ones you set once and stop looking at.
+ *
+ * Collapsed sections still render their heading and their summary, so the rail
+ * reads as a list of what is there rather than hiding the fact that a control
+ * exists at all.
+ */
+export function CollapsibleSection({
+  title,
+  summary,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  /** A word or two shown on the closed row, so it need not be opened to read. */
+  summary?: ReactNode;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 rounded py-1 text-left"
+      >
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          {title}
+        </span>
+        {summary !== undefined && (
+          <span className="text-xs tabular-nums text-slate-400">{summary}</span>
+        )}
+        <span
+          aria-hidden
+          className={`ml-auto text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}
+        >
+          &#9662;
+        </span>
+      </button>
+      {open && <div className="mt-2">{children}</div>}
+    </section>
   );
 }

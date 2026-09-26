@@ -3,7 +3,8 @@ import { Circle, Line, Rect, Text } from 'react-konva';
 import { buildEdgeIndex, collinearRuns } from '../core/walls';
 import { minPanelCount, tilingSequence } from '../core/tiling';
 import { categoryColor, getPanelSpec } from '../core/panels';
-import { formatFt, unitsToFt } from '../core/units';
+import { formatLength, unitsToFt } from '../core/units';
+import type { LengthUnit } from '../core/units';
 import type { GridPoint, Panel, PanelCategory, PanelSizeId, ValidationIssue } from '../core/types';
 import type { Junction } from '../core/junctions';
 import { COLORS, PX_PER_UNIT, WALL_PX } from './view';
@@ -11,6 +12,7 @@ import { COLORS, PX_PER_UNIT, WALL_PX } from './view';
 interface DimensionProps {
   panels: Panel[];
   scale: number;
+  unit: LengthUnit;
 }
 
 /**
@@ -18,7 +20,7 @@ interface DimensionProps {
  * dimensions without measuring. Runs shorter than 2 units are left unlabelled;
  * the label would be wider than the wall.
  */
-export function RunDimensions({ panels, scale }: DimensionProps) {
+export function RunDimensions({ panels, scale, unit }: DimensionProps) {
   const runs = collinearRuns(buildEdgeIndex(panels));
   const fontSize = Math.max(8, 11 / scale);
 
@@ -41,7 +43,7 @@ export function RunDimensions({ panels, scale }: DimensionProps) {
             y={y}
             width={72}
             align={horizontal ? 'center' : 'left'}
-            text={formatFt(unitsToFt(run.lengthUnits))}
+            text={formatLength(unitsToFt(run.lengthUnits), unit)}
             fontSize={fontSize}
             fontStyle="bold"
             fontFamily="ui-monospace, monospace"
@@ -180,6 +182,7 @@ interface PreviewProps {
   cursor: GridPoint | null;
   category: PanelCategory;
   scale: number;
+  unit: LengthUnit;
 }
 
 /**
@@ -187,7 +190,7 @@ interface PreviewProps {
  * drawn panel by panel with its length and panel count. The architect sees the
  * BOM consequence of the wall before committing to it.
  */
-export function WallPreview({ anchor, cursor, category, scale }: PreviewProps) {
+export function WallPreview({ anchor, cursor, category, scale, unit }: PreviewProps) {
   if (!anchor) return null;
 
   if (!cursor) {
@@ -265,7 +268,9 @@ export function WallPreview({ anchor, cursor, category, scale }: PreviewProps) {
             y={((axis === 'h' ? start.y : start.y + lengthUnits / 2) * PX_PER_UNIT) - fontSize * 2.2}
             width={120}
             align="center"
-            text={`${formatFt(unitsToFt(lengthUnits))} · ${minPanelCount(lengthUnits) ?? '?'} panels`}
+            text={`${formatLength(unitsToFt(lengthUnits), unit)} · ${
+              minPanelCount(lengthUnits) ?? '?'
+            } panels`}
             fontSize={fontSize}
             fontStyle="bold"
             fontFamily="ui-monospace, monospace"
@@ -307,5 +312,103 @@ export function BrushPreview({ edge, size, category, scale }: BrushProps) {
       strokeWidth={Math.max(1, 1 / scale)}
       listening={false}
     />
+  );
+}
+
+/**
+ * The room tool's live rectangle: four runs, their dimensions and the panel
+ * count, before anything is committed.
+ */
+export function RoomPreview({
+  start,
+  end,
+  category,
+  scale,
+  unit,
+}: {
+  start: GridPoint | null;
+  end: GridPoint | null;
+  category: PanelCategory;
+  scale: number;
+  unit: LengthUnit;
+}) {
+  if (!start || !end) return null;
+  const minX = Math.min(start.x, end.x);
+  const maxX = Math.max(start.x, end.x);
+  const minY = Math.min(start.y, end.y);
+  const maxY = Math.max(start.y, end.y);
+  const widthUnits = maxX - minX;
+  const depthUnits = maxY - minY;
+  if (widthUnits === 0 || depthUnits === 0) return null;
+
+  const colour = categoryColor(category);
+  const fontSize = Math.max(9, 12 / scale);
+  const panels =
+    2 * ((minPanelCount(widthUnits) ?? 0) + (minPanelCount(depthUnits) ?? 0));
+
+  return (
+    <>
+      <Rect
+        x={minX * PX_PER_UNIT}
+        y={minY * PX_PER_UNIT}
+        width={widthUnits * PX_PER_UNIT}
+        height={depthUnits * PX_PER_UNIT}
+        fill={colour}
+        opacity={0.12}
+        stroke={colour}
+        strokeWidth={Math.max(2, WALL_PX / 2 / scale)}
+        listening={false}
+      />
+      <Text
+        x={(minX + widthUnits / 2) * PX_PER_UNIT - 90}
+        y={minY * PX_PER_UNIT - fontSize * 2}
+        width={180}
+        align="center"
+        text={`${formatLength(unitsToFt(widthUnits), unit)} × ${formatLength(
+          unitsToFt(depthUnits),
+          unit,
+        )} · ${panels} panels`}
+        fontSize={fontSize}
+        fontStyle="bold"
+        fontFamily="ui-monospace, monospace"
+        fill={COLORS.anchor}
+        stroke="#ffffff"
+        strokeWidth={Math.max(2, 3 / scale)}
+        fillAfterStrokeEnabled
+        listening={false}
+      />
+    </>
+  );
+}
+
+/**
+ * A ring on the grid node a press will actually land on.
+ *
+ * The fix for the complaint that started this: on a phone one 2 ft step can be
+ * a handful of pixels, so a fingertip covers several of them and you cannot
+ * tell which one you are about to take. Showing the answer, large, before the
+ * finger lifts turns guesswork into aiming.
+ */
+export function SnapRing({ node, scale }: { node: GridPoint | null; scale: number }) {
+  if (!node) return null;
+  const radius = Math.max(9, 14 / scale);
+  return (
+    <>
+      <Circle
+        x={node.x * PX_PER_UNIT}
+        y={node.y * PX_PER_UNIT}
+        radius={radius}
+        stroke={COLORS.anchor}
+        strokeWidth={Math.max(1.5, 2.5 / scale)}
+        listening={false}
+      />
+      <Circle
+        x={node.x * PX_PER_UNIT}
+        y={node.y * PX_PER_UNIT}
+        radius={Math.max(2, 3 / scale)}
+        fill={COLORS.anchor}
+        listening={false}
+      />
+    </>
   );
 }

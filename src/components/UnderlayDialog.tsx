@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { plotBboxUnits } from '../core/plot';
-import { GRID_FT, formatFt } from '../core/units';
+import { GRID_FT, toDisplay } from '../core/units';
 import { loadUnderlayFile } from '../canvas/underlay';
 import { useStore } from '../state/store';
 import { Button, Field, Modal, NumberInput } from './ui';
@@ -22,6 +22,7 @@ export function UnderlayDialog({ onClose }: Props) {
   const updateUnderlay = useStore((s) => s.updateUnderlay);
   const startCalibration = useStore((s) => s.startCalibration);
   const notify = useStore((s) => s.notify);
+  const unit = useStore((s) => s.unit);
 
   const fileInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -79,7 +80,8 @@ export function UnderlayDialog({ onClose }: Props) {
             <div className="flex justify-between gap-3">
               <dt className="text-slate-500">Scale</dt>
               <dd className="font-medium tabular-nums text-slate-800">
-                {formatFt(Math.round(underlay.scale * GRID_FT * 1000) / 1000)} per image pixel
+                {Math.round(toDisplay(underlay.scale * GRID_FT, unit) * 1000) / 1000} {unit} per
+                image pixel
               </dd>
             </div>
           </dl>

@@ -1,6 +1,16 @@
 import { useState } from 'react';
 import { plotAreaSqFt, plotEdgeLengthsFt, rectPlotFromFt } from '../core/plot';
-import { GRID_FT, formatFt, isModularFt, nearestModularFt } from '../core/units';
+import {
+  formatArea,
+  formatLength,
+  fromDisplay,
+  inputMin,
+  inputStep,
+  isModularFt,
+  moduleLabel,
+  nearestModularFt,
+  toInputValue,
+} from '../core/units';
 import { useStore } from '../state/store';
 import { Button, Field, Modal, NumberInput } from './ui';
 
@@ -9,18 +19,26 @@ interface Props {
 }
 
 /**
- * Plot setup. The parcel is entered in real feet and snapped down onto the 2 ft
- * module - the dialog shows exactly what that costs, rather than silently
- * changing the number the surveyor gave.
+ * Plot setup. The parcel is entered in the reader's own unit and snapped down
+ * onto the 2 ft module - the dialog shows exactly what that costs, rather than
+ * silently changing the number the surveyor gave.
+ *
+ * The two inputs hold *display* values, not feet, and convert once on the way
+ * into the model. Holding feet and converting on the way out would re-round
+ * every keystroke, so a typed 18.5 m would redisplay as 18.500000000000004.
  */
 export function PlotDialog({ onClose }: Props) {
   const plot = useStore((s) => s.plan.plot);
   const setPlot = useStore((s) => s.setPlot);
 
-  const currentEdges = plotEdgeLengthsFt(plot);
-  const [widthFt, setWidthFt] = useState(currentEdges[0] ?? 60);
-  const [lengthFt, setLengthFt] = useState(currentEdges[1] ?? 40);
+  const unit = useStore((s) => s.unit);
 
+  const currentEdges = plotEdgeLengthsFt(plot);
+  const [width, setWidth] = useState(() => toInputValue(currentEdges[0] ?? 60, unit));
+  const [length, setLength] = useState(() => toInputValue(currentEdges[1] ?? 40, unit));
+
+  const widthFt = fromDisplay(width, unit);
+  const lengthFt = fromDisplay(length, unit);
   const preview = rectPlotFromFt(widthFt, lengthFt);
   const [buildableWidth, buildableLength] = plotEdgeLengthsFt(preview);
   const lostWidth = widthFt - buildableWidth;
@@ -47,16 +65,29 @@ export function PlotDialog({ onClose }: Props) {
       }
     >
       <p className="text-xs leading-relaxed text-slate-600">
-        Enter the parcel in feet. Buildable dimensions round <strong>down</strong> onto the{' '}
-        {GRID_FT} ft module, so the design area never exceeds the land you actually have.
+        Enter the parcel in {unit === 'm' ? 'metres' : 'feet'}. Buildable dimensions round{' '}
+        <strong>down</strong> onto the {moduleLabel(unit)} module, so the design area never exceeds
+        the land you actually have.
       </p>
 
       <div className="grid grid-cols-2 gap-3">
         <Field label="Width (frontage)">
-          <NumberInput value={widthFt} onChange={setWidthFt} min={2} step={1} suffix="ft" />
+          <NumberInput
+            value={width}
+            onChange={setWidth}
+            min={inputMin(unit)}
+            step={inputStep(unit)}
+            suffix={unit}
+          />
         </Field>
         <Field label="Length (depth)">
-          <NumberInput value={lengthFt} onChange={setLengthFt} min={2} step={1} suffix="ft" />
+          <NumberInput
+            value={length}
+            onChange={setLength}
+            min={inputMin(unit)}
+            step={inputStep(unit)}
+            suffix={unit}
+          />
         </Field>
       </div>
 
@@ -64,15 +95,15 @@ export function PlotDialog({ onClose }: Props) {
         <div className="flex justify-between">
           <dt className="text-slate-500">Buildable area</dt>
           <dd className="font-medium tabular-nums text-slate-800">
-            {formatFt(buildableWidth)} &times; {formatFt(buildableLength)} ={' '}
-            {plotAreaSqFt(preview).toLocaleString('en-IN')} sq ft
+            {formatLength(buildableWidth, unit)} &times; {formatLength(buildableLength, unit)} ={' '}
+            {formatArea(plotAreaSqFt(preview), unit)}
           </dd>
         </div>
         {(lostWidth > 0 || lostLength > 0) && (
           <div className="flex justify-between">
             <dt className="text-slate-500">Set aside by snapping</dt>
             <dd className="font-medium tabular-nums text-slate-800">
-              {formatFt(lostWidth)} &times; {formatFt(lostLength)}
+              {formatLength(lostWidth, unit)} &times; {formatLength(lostLength, unit)}
             </dd>
           </div>
         )}
@@ -80,20 +111,20 @@ export function PlotDialog({ onClose }: Props) {
 
       {nonModular && (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
-          A dimension that is not a multiple of {GRID_FT} ft cannot be tiled without cutting a
-          panel, which Arplace&rsquo;s system does not allow.
+          A dimension that is not a multiple of {moduleLabel(unit)} cannot be tiled without cutting
+          a panel, which Arplace&rsquo;s system does not allow.
           {!isModularFt(widthFt) && (
             <>
               {' '}
-              Nearest buildable widths: {formatFt(nearestModularFt(widthFt).down)} or{' '}
-              {formatFt(nearestModularFt(widthFt).up)}.
+              Nearest buildable widths: {formatLength(nearestModularFt(widthFt).down, unit)} or{' '}
+              {formatLength(nearestModularFt(widthFt).up, unit)}.
             </>
           )}
           {!isModularFt(lengthFt) && (
             <>
               {' '}
-              Nearest buildable lengths: {formatFt(nearestModularFt(lengthFt).down)} or{' '}
-              {formatFt(nearestModularFt(lengthFt).up)}.
+              Nearest buildable lengths: {formatLength(nearestModularFt(lengthFt).down, unit)} or{' '}
+              {formatLength(nearestModularFt(lengthFt).up, unit)}.
             </>
           )}
         </p>

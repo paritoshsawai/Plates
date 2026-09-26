@@ -7,17 +7,30 @@ import {
   PLACEABLE_CATEGORIES,
 } from '../core/panels';
 import type { PanelCategory } from '../core/types';
-import { GRID_FT, WALL_HEIGHT_FT, formatFt } from '../core/units';
+import { GRID_FT, WALL_HEIGHT_FT, formatArea, formatLength } from '../core/units';
 import { plotAreaSqFt, plotEdgeLengthsFt } from '../core/plot';
 import { useStore } from '../state/store';
-import { Button, SectionTitle } from './ui';
+import { useCoarsePointer } from './useMediaQuery';
+import { Button, CollapsibleSection, SectionTitle } from './ui';
 
 interface Props {
   onEditPlot(): void;
   onEditUnderlay(): void;
+  /**
+   * Which half of the rail to render.
+   *
+   * On a desktop this is left alone and the whole rail shows, exactly as it
+   * always has. The bottom sheet uses it to put drawing and visibility behind
+   * separate tabs, because the full rail is eight sections and that is a long
+   * scroll on a phone.
+   */
+  only?: 'draw' | 'layers';
 }
 
-export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
+export function LeftRail({ onEditPlot, onEditUnderlay, only }: Props) {
+  const touch = useCoarsePointer();
+  const showDraw = only !== 'layers';
+  const showLayers = only !== 'draw';
   const tool = useStore((s) => s.tool);
   const setTool = useStore((s) => s.setTool);
   const brush = useStore((s) => s.brush);
@@ -54,18 +67,35 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
 
   const readOnly = role === 'client';
   const edges = plotEdgeLengthsFt(plot);
+  const unit = useStore((s) => s.unit);
 
   return (
     <aside className="flex w-full shrink-0 flex-col gap-5 border-t border-slate-200 bg-white p-4 lg:w-60 lg:overflow-y-auto lg:border-t-0 lg:border-r">
+      {showDraw && (
       <section>
         <SectionTitle>Tools</SectionTitle>
         <div className="grid gap-1.5">
+          <ToolButton
+            active={tool === 'room'}
+            disabled={readOnly}
+            onClick={() => setTool('room')}
+            label="Draw room"
+            hint={
+              touch
+                ? 'Drag out a rectangle and all four walls are built at once.'
+                : 'Drag out a rectangle, or click two opposite corners. All four walls are built at once.'
+            }
+          />
           <ToolButton
             active={tool === 'wall'}
             disabled={readOnly}
             onClick={() => setTool('wall')}
             label="Draw wall"
-            hint="Click two points; the run is auto-filled with the fewest panels."
+            hint={
+              touch
+                ? 'Drag from one end to the other. The ring shows where it will land.'
+                : 'Click two points, or drag from one end to the other; the run is auto-filled with the fewest panels.'
+            }
           />
           <ToolButton
             active={tool === 'panel'}
@@ -78,11 +108,17 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
             active={tool === 'select'}
             onClick={() => setTool('select')}
             label="Select & move"
-            hint="Drag a panel to move it, or drag the background to box-select. Hold Space to pan."
+            hint={
+              touch
+                ? 'Tap a panel to select it. Hold one down for more, including delete.'
+                : 'Drag a panel to move it, or drag the background to box-select. Right-drag moves the map.'
+            }
           />
         </div>
       </section>
+      )}
 
+      {showDraw && (
       <section>
         <SectionTitle>Category</SectionTitle>
         <div className="grid gap-1.5">
@@ -111,7 +147,9 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
           area-tiling layer.
         </p>
       </section>
+      )}
 
+      {showDraw && (
       <section>
         <SectionTitle>Size</SectionTitle>
         <div className="grid gap-1.5">
@@ -146,56 +184,11 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
           common divisor of the two widths.
         </p>
       </section>
+      )}
 
-      <section>
-        <SectionTitle>Layers</SectionTitle>
-        <div className="grid gap-1">
-          {ALL_CATEGORIES.map((category) => {
-            const count = countIn(category);
-            const hidden = hiddenLayers.includes(category);
-            return (
-              <button
-                key={category}
-                type="button"
-                onClick={() => toggleLayer(category)}
-                aria-pressed={!hidden}
-                // Names the action, not the state, which is what a toggle button
-                // should announce - and keeps it distinct from the strip buttons.
-                aria-label={`${hidden ? 'Show' : 'Hide'} ${CATEGORY_STYLE[category].plural}`}
-                className={`flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition hover:bg-slate-50 ${
-                  hidden ? 'text-slate-400' : 'text-slate-700'
-                }`}
-              >
-                <span
-                  className="h-3 w-3 shrink-0 rounded-sm"
-                  style={{
-                    backgroundColor: CATEGORY_STYLE[category].color,
-                    opacity: hidden ? 0.3 : 1,
-                  }}
-                />
-                <span className="flex-1">{CATEGORY_STYLE[category].plural}</span>
-                <span className="tabular-nums text-xs text-slate-400">{count}</span>
-                <span className="w-10 shrink-0 text-right text-xs font-medium">
-                  {hidden ? 'Show' : 'Hide'}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        {hiddenLayers.length > 0 && (
-          <div className="mt-1.5">
-            <Button variant="ghost" onClick={showAllLayers}>
-              Show all layers
-            </Button>
-          </div>
-        )}
-        <p className="mt-2 text-xs leading-snug text-slate-500">
-          Hiding is a view control only. A hidden layer is still built, still validated and still
-          priced &mdash; it just gets out of the way so you can see underneath.
-        </p>
-      </section>
 
-      {!readOnly && (
+
+      {!readOnly && showLayers && (
         <section>
           <SectionTitle>Floor &amp; roof</SectionTitle>
           <div className="grid gap-1.5">
@@ -213,18 +206,21 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
                     </span>
                     <span className="text-xs tabular-nums text-slate-500">{count}</span>
                   </div>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    <Button onClick={() => fillArea(category, areaAxis[category])}>
-                      {count > 0 ? 'Refill' : 'Fill'}
-                    </Button>
-                    {count > 0 && (
-                      <Button variant="danger" onClick={() => clearArea(category)}>
-                        Clear
+                  {/* Fill and Strips share a row: each was only a third of the
+                      width, so two rows made every card half again as tall. */}
+                  <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1.5">
+                    <div className="flex flex-wrap gap-1.5">
+                      <Button onClick={() => fillArea(category, areaAxis[category])}>
+                        {count > 0 ? 'Refill' : 'Fill'}
                       </Button>
-                    )}
-                  </div>
-                  <div className="mt-1.5 flex items-center gap-1.5">
-                    <span className="text-xs text-slate-500">Strips</span>
+                      {count > 0 && (
+                        <Button variant="danger" onClick={() => clearArea(category)}>
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-slate-500">Strips</span>
                     {(
                       [
                         ['h', '\u2194', 'across'],
@@ -244,9 +240,10 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
                             : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
                         }`}
                       >
-                        {glyph}
-                      </button>
-                    ))}
+                          {glyph}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               );
@@ -261,7 +258,7 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
         </section>
       )}
 
-      {!readOnly && (
+      {!readOnly && showDraw && (
         <section>
           <SectionTitle>Openings</SectionTitle>
           <div className="grid gap-1.5">
@@ -307,7 +304,7 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
         </section>
       )}
 
-      {!readOnly && (
+      {!readOnly && showDraw && (
         <section>
           <SectionTitle>Selection</SectionTitle>
           <div className="flex flex-wrap gap-1.5">
@@ -334,12 +331,13 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
         </section>
       )}
 
+      {showDraw && (
       <section>
         <SectionTitle>Plot</SectionTitle>
         <dl className="space-y-1 text-xs text-slate-600">
-          <Row label="Area" value={`${plotAreaSqFt(plot).toLocaleString('en-IN')} sq ft`} />
-          <Row label="Boundary" value={edges.map((e) => formatFt(e)).join(' × ')} />
-          <Row label="Wall height" value={formatFt(WALL_HEIGHT_FT)} />
+          <Row label="Area" value={formatArea(plotAreaSqFt(plot), unit)} />
+          <Row label="Boundary" value={edges.map((e) => formatLength(e, unit)).join(' × ')} />
+          <Row label="Wall height" value={formatLength(WALL_HEIGHT_FT, unit)} />
         </dl>
         {!readOnly && (
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -350,6 +348,59 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
           </div>
         )}
       </section>
+      )}
+      {showLayers && (
+        <CollapsibleSection
+          title="Layers"
+          summary={hiddenLayers.length > 0 ? `${hiddenLayers.length} hidden` : 'all shown'}
+        >
+          <div className="grid gap-1">
+            {ALL_CATEGORIES.map((category) => {
+              const count = countIn(category);
+              const hidden = hiddenLayers.includes(category);
+              return (
+                <button
+                  key={category}
+                  type="button"
+                  onClick={() => toggleLayer(category)}
+                  aria-pressed={!hidden}
+                  // Names the action, not the state, which is what a toggle
+                  // button should announce - and keeps it distinct from the
+                  // strip buttons.
+                  aria-label={`${hidden ? 'Show' : 'Hide'} ${CATEGORY_STYLE[category].plural}`}
+                  className={`flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition hover:bg-slate-50 ${
+                    hidden ? 'text-slate-400' : 'text-slate-700'
+                  }`}
+                >
+                  <span
+                    className="h-3 w-3 shrink-0 rounded-sm"
+                    style={{
+                      backgroundColor: CATEGORY_STYLE[category].color,
+                      opacity: hidden ? 0.3 : 1,
+                    }}
+                  />
+                  <span className="flex-1">{CATEGORY_STYLE[category].plural}</span>
+                  <span className="tabular-nums text-xs text-slate-400">{count}</span>
+                  <span className="w-10 shrink-0 text-right text-xs font-medium">
+                    {hidden ? 'Show' : 'Hide'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {hiddenLayers.length > 0 && (
+            <div className="mt-1.5">
+              <Button variant="ghost" onClick={showAllLayers}>
+                Show all layers
+              </Button>
+            </div>
+          )}
+          <p className="mt-2 text-xs leading-snug text-slate-500">
+            Hiding is a view control only. A hidden layer is still built, still validated and still
+            priced &mdash; it just gets out of the way so you can see underneath.
+          </p>
+        </CollapsibleSection>
+      )}
     </aside>
   );
 }

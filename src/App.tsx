@@ -10,10 +10,14 @@ import { PlotDialog } from './components/PlotDialog';
 import { PricingDialog } from './components/PricingDialog';
 import { UnderlayDialog } from './components/UnderlayDialog';
 import { CalibrationBanner } from './components/CalibrationBanner';
+import { Sheet } from './components/Sheet';
+import { useCompactLayout, usePhoneLayout } from './components/useMediaQuery';
 import { buildBom } from './core/bom';
 import { EXPORT_HIDDEN, PX_PER_UNIT, planBoundsUnits } from './canvas/view';
 import { serializePlan } from './core/plan';
 import { validatePlan } from './core/validation';
+import { plotAreaSqFt } from './core/plot';
+import { footprintAreaSqFt, interiorCells } from './core/footprint';
 import { toWorkOrder } from './core/workorder';
 import { bomToCsv } from './export/csv';
 import {
@@ -47,9 +51,25 @@ export default function App() {
   const clearMessage = useStore((s) => s.clearMessage);
   const notify = useStore((s) => s.notify);
   const refreshSavedPlans = useStore((s) => s.refreshSavedPlans);
+  const unit = useStore((s) => s.unit);
+  const compact = useCompactLayout();
+  const phone = usePhoneLayout();
 
-  const validation = useMemo(() => validatePlan(plan.panels, plan.plot), [plan.panels, plan.plot]);
+  const validation = useMemo(
+    () => validatePlan(plan.panels, plan.plot, unit),
+    [plan.panels, plan.plot, unit],
+  );
   const bom = useMemo(() => buildBom(plan.panels, priceConfig), [plan.panels, priceConfig]);
+
+  // Both views show these, so the flood fill runs once per change rather than
+  // once per view. `interiorCells` walks the whole wall bounding box.
+  const areas = useMemo(
+    () => ({
+      plotSqFt: plotAreaSqFt(plan.plot),
+      floorSqFt: footprintAreaSqFt(interiorCells(plan.panels)),
+    }),
+    [plan.plot, plan.panels],
+  );
 
   useEffect(() => {
     refreshSavedPlans();
@@ -134,6 +154,8 @@ export default function App() {
       if (e.key === '1') state.setTool('wall');
       if (e.key === '2') state.setTool('panel');
       if (e.key === '3') state.setTool('select');
+      if (e.key === '4') state.setTool('room');
+      if (e.key.toLowerCase() === 'h') state.setTool('pan');
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -244,7 +266,7 @@ export default function App() {
         const planImage = capturePlanImage();
         try {
           const { buildQuotePdf } = await import('./export/pdf');
-          buildQuotePdf({ plan, bom, priceConfig, validation, planImage }).save(
+          buildQuotePdf({ plan, bom, priceConfig, validation, planImage, unit }).save(
             `${slugify(plan.name)}-quote.pdf`,
           );
         } catch (error) {
@@ -255,7 +277,7 @@ export default function App() {
       csv() {
         void deliverText(
           'BOM CSV',
-          bomToCsv(plan, bom),
+          bomToCsv(plan, bom, unit),
           `${slugify(plan.name)}-bom.csv`,
           'text/csv;charset=utf-8',
         );
@@ -275,21 +297,23 @@ export default function App() {
         }
         void deliverText(
           'Work order JSON',
-          JSON.stringify(toWorkOrder(plan, bom), null, 2),
+          JSON.stringify(toWorkOrder(plan, bom, unit), null, 2),
           `${slugify(plan.name)}-work-order.json`,
           'application/json',
         );
       },
     }),
-    [plan, bom, priceConfig, validation, capturePlanImage, notify, deliverText],
+    [plan, bom, priceConfig, validation, unit, capturePlanImage, notify, deliverText],
   );
 
   return (
     // Full height on a desktop so the canvas fills the screen; on a narrow
     // screen the rails stack under the drawing and the page scrolls instead.
-    <div className="flex min-h-full flex-col bg-slate-100 text-slate-900 lg:h-full">
+    <div className="flex h-full flex-col bg-slate-100 text-slate-900">
       <TopBar
         exports={exports}
+        view={view}
+        onSetView={setView}
         onOpenPlans={() => setDialog('plans')}
         onOpenPricing={() => setDialog('pricing')}
         onNewPlan={() => {
@@ -299,32 +323,18 @@ export default function App() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        {role !== 'client' && (
+        {role !== 'client' && !compact && (
           <LeftRail
             onEditPlot={() => setDialog('plot')}
             onEditUnderlay={() => setDialog('underlay')}
           />
         )}
-        <main className="relative order-first flex min-h-[55vh] min-w-0 flex-1 flex-col lg:order-none lg:min-h-0">
-          <div className="flex shrink-0 gap-1 border-b border-slate-200 bg-white px-2 py-1.5">
-            {(['plan', '3d'] as const).map((id) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setView(id)}
-                className={`rounded px-2.5 py-1 text-xs font-medium transition ${
-                  view === id ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {id === 'plan' ? 'Plan' : '3D'}
-              </button>
-            ))}
-          </div>
+        <main className="relative order-first flex min-h-0 min-w-0 flex-1 flex-col lg:order-none">
 
           {/* The plan canvas stays mounted: unmounting Konva would lose the
               viewport, and the PDF export captures its stage. */}
           <div className={`relative min-h-0 flex-1 ${view === 'plan' ? '' : 'hidden'}`}>
-            <DesignCanvas validation={validation} stageRef={stageRef} />
+            <DesignCanvas validation={validation} areas={areas} stageRef={stageRef} />
             <CalibrationBanner />
           </div>
 
@@ -337,16 +347,30 @@ export default function App() {
                   </p>
                 }
               >
-                <ThreeView />
+                <ThreeView areas={areas} />
               </Suspense>
             </div>
           )}
+          {compact && (
+            <Sheet
+              bom={bom}
+              validation={validation}
+              onEditPlot={() => setDialog('plot')}
+              onEditUnderlay={() => setDialog('underlay')}
+              onEditPricing={() => setDialog('pricing')}
+              // A phone is for reading the answer; a tablet has room to draw.
+              initialTab={phone ? 'materials' : 'tools'}
+              initiallyOpen={!phone}
+            />
+          )}
         </main>
-        <RightRail
-          bom={bom}
-          validation={validation}
-          onEditPricing={() => setDialog('pricing')}
-        />
+        {!compact && (
+          <RightRail
+            bom={bom}
+            validation={validation}
+            onEditPricing={() => setDialog('pricing')}
+          />
+        )}
       </div>
 
       {dialog === 'plot' && <PlotDialog onClose={() => setDialog(null)} />}

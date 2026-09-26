@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Group, Layer, Rect, Stage } from 'react-konva';
 import type Konva from 'konva';
+import { Konva as KonvaGlobal } from 'konva/lib/Global';
 import { GridLayer } from './GridLayer';
 import { PlotShape } from './PlotShape';
 import { PanelShape } from './PanelShape';
@@ -11,7 +12,9 @@ import {
   IssueMarkers,
   JunctionMarkers,
   MarqueeBox,
+  RoomPreview,
   RunDimensions,
+  SnapRing,
   UncoveredArea,
   WallPreview,
 } from './Annotations';
@@ -22,13 +25,18 @@ import {
   fitToBox,
   nearestEdge,
   nearestNode,
+  panBy,
   visibleUnits,
+  wheelIntent,
   zoomAt,
+  zoomBy,
 } from './view';
+import { midpoint, normalizeWheelDelta, pinchFactor, pointerDistance } from '../core/gestures';
 import type { Viewport } from './view';
 import { plotBboxUnits } from '../core/plot';
 import { isInsidePlot, wouldOverlap } from '../core/validation';
 import {
+  CATEGORY_STYLE,
   newPanelId,
   panelBoundsUnits,
   rectsIntersect,
@@ -36,17 +44,52 @@ import {
   visiblePanels,
 } from '../core/panels';
 import { detectJunctions } from '../core/junctions';
+import { straightEnd } from '../core/room';
+import { formatLength, unitsToFt } from '../core/units';
+import { useCoarsePointer } from '../components/useMediaQuery';
+
+// Konva stops hit-testing and stops updating pointer positions while a node is
+// being dragged. With the stage draggable - which is how a finger pans - that
+// means a second finger is never registered, so a pinch arrives as a one-finger
+// pan. This is the documented switch for multi-touch.
+KonvaGlobal.hitOnDragEnabled = true;
+import { AreaReadout } from '../components/AreaReadout';
+import type { PlanAreas } from '../components/AreaReadout';
 import { useStore } from '../state/store';
+import type { Tool } from '../state/store';
 import { isLinearCategory } from '../core/types';
 import type { GridEdge, GridPoint, Panel, ValidationResult } from '../core/types';
 import type { UnitRect } from '../core/panels';
 
 interface Props {
   validation: ValidationResult;
+  areas: PlanAreas;
   stageRef: React.RefObject<Konva.Stage | null>;
 }
 
-export function DesignCanvas({ validation, stageRef }: Props) {
+/** A hand, for the button that grabs the drawing. */
+function HandIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11" />
+      <path d="M11 11V4.5a1.5 1.5 0 0 1 3 0V11" />
+      <path d="M14 11.5V6.5a1.5 1.5 0 0 1 3 0V15" />
+      <path d="M17 12a1.5 1.5 0 0 1 3 0v3a6 6 0 0 1-6 6h-2a6 6 0 0 1-5.2-3L5 15.2a1.5 1.5 0 0 1 2.6-1.5L8.6 15" />
+    </svg>
+  );
+}
+
+export function DesignCanvas({ validation, areas, stageRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [viewport, setViewport] = useState<Viewport>({ scale: 1, x: 80, y: 80 });
@@ -54,6 +97,31 @@ export function DesignCanvas({ validation, stageRef }: Props) {
   const [hoverEdge, setHoverEdge] = useState<GridEdge | null>(null);
   const [hoverRaw, setHoverRaw] = useState<GridPoint | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
+  /** True while a pan drag is live, so the cursor can close its hand. */
+  const [dragging, setDragging] = useState(false);
+  /**
+   * Whether `size` is a real measurement yet, rather than the placeholder.
+   *
+   * State and not a ref: a ref flips the instant the observer fires, which can
+   * land before React has applied the `setSize` from the same callback. The
+   * fit effect then ran against the stale placeholder size and marked itself
+   * done, so the real measurement never got a fit. Batched state cannot
+   * disagree with itself that way.
+   */
+  const [measured, setMeasured] = useState(false);
+  /**
+   * When a finger last touched the canvas.
+   *
+   * A touchscreen fires a compatibility `mousedown` a moment after every tap.
+   * Left alone it re-enters placement at the same point, where the wall tool
+   * reads an anchor and a cursor in the same place as a zero-length run and
+   * clears the anchor again - so tapping twice built nothing at all. Mouse
+   * events arriving in the shadow of a touch are that echo, and are ignored.
+   */
+  const lastTouchAt = useRef(0);
+
+  /** Finger span and midpoint from the previous touchmove, while pinching. */
+  const pinch = useRef<{ distance: number; mid: { x: number; y: number } } | null>(null);
   const [marquee, setMarquee] = useState<UnitRect | null>(null);
   // The drag in progress, kept in a ref so a move handler never reads a stale
   // render's copy of it.
@@ -68,6 +136,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
   const selection = useStore((s) => s.selection);
   const wallAnchor = useStore((s) => s.wallAnchor);
   const setWallAnchor = useStore((s) => s.setWallAnchor);
+  const setTool = useStore((s) => s.setTool);
   const autoFillRun = useStore((s) => s.autoFillRun);
   const addPanels = useStore((s) => s.addPanels);
   const movePanel = useStore((s) => s.movePanel);
@@ -78,7 +147,41 @@ export function DesignCanvas({ validation, stageRef }: Props) {
   const setPanelCategory = useStore((s) => s.setPanelCategory);
   const hiddenLayers = useStore((s) => s.hiddenLayers);
   const calibration = useStore((s) => s.calibration);
+  const unit = useStore((s) => s.unit);
+  const coarsePointer = useCoarsePointer();
   const setCalibrationPoint = useStore((s) => s.setCalibrationPoint);
+  const buildRoom = useStore((s) => s.buildRoom);
+  const deleteSelection = useStore((s) => s.deleteSelection);
+
+  /**
+   * The panel a finger is resting on, if any.
+   *
+   * Deleting is a keystroke on a desktop and had no equivalent at all on a
+   * touchscreen: there is no Delete key and no right-click. Holding a panel
+   * opens the actions for it.
+   */
+  const [heldPanelId, setHeldPanelId] = useState<string | null>(null);
+
+  /**
+   * The tool to come back to when the hand is switched off.
+   *
+   * Local rather than in the store: which tool you were using before you
+   * grabbed the map is a fact about this pane, not about the drawing. It
+   * matters most on a phone, where the tool list is behind the bottom sheet -
+   * without a toggle, repositioning costs open-sheet, switch, pan, open-sheet,
+   * switch back.
+   */
+  const toolBeforePan = useRef<Tool>('select');
+  const togglePan = () => {
+    if (tool === 'pan') {
+      setTool(toolBeforePan.current);
+      return;
+    }
+    toolBeforePan.current = tool;
+    setTool('pan');
+  };
+  const holdEnabled = coarsePointer && tool === 'select' && !openingBrush;
+  const heldPanel = heldPanelId ? plan.panels.find((p) => p.id === heldPanelId) : undefined;
 
   const selectedIds = useMemo(() => new Set(selection), [selection]);
   const junctions = useMemo(() => detectJunctions(plan.panels), [plan.panels]);
@@ -103,11 +206,18 @@ export function DesignCanvas({ validation, stageRef }: Props) {
     if (!element) return;
     const observer = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
+      setMeasured(true);
       setSize({ width: Math.max(320, width), height: Math.max(240, height) });
     });
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  /** The +/- buttons zoom about the centre of what you are looking at. */
+  const zoomStep = (factor: number) =>
+    setViewport((current) =>
+      zoomBy(current, { x: size.width / 2, y: size.height / 2 }, factor),
+    );
 
   const fitToPlot = useCallback(() => {
     setViewport(fitToBox(plotBboxUnits(plan.plot), size.width, size.height));
@@ -115,12 +225,18 @@ export function DesignCanvas({ validation, stageRef }: Props) {
 
   // Frame the parcel once the canvas has a real size, and again whenever the
   // user opens a different plan.
+  //
+  // It has to wait for the observer rather than trusting `size`, which starts
+  // at a placeholder 800 x 600. Fitting to that guess framed the plot for a
+  // container nobody had measured - barely noticeable on a laptop, where 800
+  // is close to the truth, and badly wrong on a 390 px phone, which opened
+  // showing a corner of the parcel with no way to tell why.
   const fittedFor = useRef<string>('');
   useEffect(() => {
-    if (size.width <= 320 || fittedFor.current === plan.id) return;
+    if (!measured || fittedFor.current === plan.id) return;
     fittedFor.current = plan.id;
     fitToPlot();
-  }, [plan.id, size.width, fitToPlot]);
+  }, [plan.id, measured, size.width, size.height, fitToPlot]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -147,8 +263,19 @@ export function DesignCanvas({ validation, stageRef }: Props) {
    * drag on empty canvas means in every drawing tool. Space was already the
    * documented pan modifier and is already hinted on screen, so nothing is
    * lost by making it the way to pan.
+   *
+   * On a touchscreen that inverts: there is no space bar and no middle button,
+   * so a drag has to pan or the drawing cannot be moved at all.
+   *
+   * Except in the drawing tools, where the finger is drawing. There two
+   * fingers pan and zoom instead, which the pinch handler does on its own
+   * without the stage being draggable at all.
+   *
+   * The Hand tool is the way out of all of that: it pans with whatever you
+   * have, in one gesture, without a modifier key or a second finger.
    */
-  const panning = spaceHeld;
+  const drawingTool = tool === 'wall' || tool === 'room';
+  const panning = tool === 'pan' || spaceHeld || (coarsePointer && !drawingTool);
 
   // Middle-drag pans from anywhere, including over a panel, so it works even
   // when the canvas is full. Konva's own stage drag cannot be limited to one
@@ -164,6 +291,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
       }));
     };
     const up = () => {
+      if (panStart.current) setDragging(false);
       panStart.current = null;
       // The stage only sees a release over itself; this catches the rest.
       finishMarquee.current();
@@ -176,8 +304,57 @@ export function DesignCanvas({ validation, stageRef }: Props) {
     };
   }, []);
 
+  /**
+   * A press-drag-release on the canvas while a drawing tool is active.
+   *
+   * Held in a ref because the commit reads it from an event handler, where a
+   * state value would be a render behind. `preview` mirrors it for drawing.
+   */
+  const draw = useRef<{ start: GridPoint; end: GridPoint; moved: boolean } | null>(null);
+  const [drawPreview, setDrawPreview] = useState<{ start: GridPoint; end: GridPoint } | null>(null);
+
+  const beginDraw = (point: { x: number; y: number }) => {
+    const node = nearestNode(point.x, point.y);
+    draw.current = { start: node, end: node, moved: false };
+    setDrawPreview({ start: node, end: node });
+  };
+
+  const updateDraw = (point: { x: number; y: number }) => {
+    const gesture = draw.current;
+    if (!gesture) return;
+    const node = nearestNode(point.x, point.y);
+    if (node.x !== gesture.start.x || node.y !== gesture.start.y) gesture.moved = true;
+    gesture.end = node;
+    setDrawPreview({ start: gesture.start, end: node });
+  };
+
+  /**
+   * Release. A drag commits what the preview showed; a press that never moved
+   * falls back to the two-point flow, so tapping twice still works and the
+   * desktop's click-click is unchanged.
+   */
+  const finishDraw = () => {
+    const gesture = draw.current;
+    draw.current = null;
+    setDrawPreview(null);
+    if (!gesture) return;
+
+    if (!gesture.moved) {
+      placeAtNode(gesture.start);
+      return;
+    }
+    if (tool === 'room') {
+      buildRoom(gesture.start, gesture.end);
+      return;
+    }
+    autoFillRun(gesture.start, straightEnd(gesture.start, gesture.end));
+  };
+
   /** Marquee is for plain select mode: anywhere else a click already means something. */
-  const marqueeArmed = tool === 'select' && !calibration.active && !openingBrush && !spaceHeld;
+  // Not on touch: there a drag is the only way to move the drawing, and a box
+  // select has no finger equivalent. Tapping picks one panel at a time.
+  const marqueeArmed =
+    tool === 'select' && !calibration.active && !openingBrush && !spaceHeld && !coarsePointer;
 
   const rectBetween = (a: { x: number; y: number }, b: { x: number; y: number }): UnitRect => ({
     x: Math.min(a.x, b.x),
@@ -192,67 +369,50 @@ export function DesignCanvas({ validation, stageRef }: Props) {
     return point;
   };
 
-  const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    const stage = e.target.getStage();
-    if (!stage) return;
-    const point = readPointer(stage);
-    if (!point) return;
-    setHoverNode(nearestNode(point.x, point.y));
-    setHoverEdge(nearestEdge(point.x, point.y));
-    const units = { x: point.x / PX_PER_UNIT, y: point.y / PX_PER_UNIT };
-    setHoverRaw(units);
-    if (marqueeStart.current) {
-      const rect = rectBetween(marqueeStart.current, units);
-      marqueeRect.current = rect;
-      setMarquee(rect);
-    }
-  };
-
-  const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    const stage = e.target.getStage();
-    if (!stage) return;
-
-    if (e.evt.button === 1) {
-      e.evt.preventDefault();
-      panStart.current = {
-        screenX: e.evt.clientX,
-        screenY: e.evt.clientY,
-        x: stage.x(),
-        y: stage.y(),
-      };
+  /**
+   * The two-point flow: the first point anchors, the second commits.
+   *
+   * Still here alongside drag-to-draw because a press that never moved is a
+   * tap, and tapping two corners is how this always worked on a desktop.
+   */
+  const placeAtNode = (node: GridPoint) => {
+    if (!wallAnchor) {
+      setWallAnchor(node);
       return;
     }
+    if (tool === 'room') {
+      buildRoom(wallAnchor, node);
+      return;
+    }
+    const end = straightEnd(wallAnchor, node);
+    if (end.x === wallAnchor.x && end.y === wallAnchor.y) {
+      setWallAnchor(null);
+      return;
+    }
+    autoFillRun(wallAnchor, end);
+  };
 
-    if (e.target !== stage || e.evt.button !== 0) return;
-    const point = readPointer(stage);
-    if (!point) return;
-
+  /**
+   * Everything a press means before selection is considered: setting a
+   * calibration point, anchoring or committing a wall run, dropping a single
+   * panel. Returns true when it consumed the press.
+   *
+   * Shared by the mouse and the tap paths. Konva dispatches `mousedown` to a
+   * mouse and `tap` to a finger and never both, so without one definition the
+   * two would drift - and for most of this app's life the touch one simply
+   * did not exist.
+   */
+  const placeAt = (point: { x: number; y: number }): boolean => {
     if (calibration.active) {
       // Unsnapped: a scan does not line up with the grid, which is exactly why
       // it needs calibrating in the first place.
       setCalibrationPoint({ x: point.x / PX_PER_UNIT, y: point.y / PX_PER_UNIT });
-      return;
+      return true;
     }
 
-    if (tool === 'wall') {
-      const node = nearestNode(point.x, point.y);
-      if (!wallAnchor) {
-        setWallAnchor(node);
-        return;
-      }
-      // Walls run straight: commit along whichever axis the user moved further.
-      const dx = node.x - wallAnchor.x;
-      const dy = node.y - wallAnchor.y;
-      const end =
-        Math.abs(dx) >= Math.abs(dy)
-          ? { x: node.x, y: wallAnchor.y }
-          : { x: wallAnchor.x, y: node.y };
-      if (end.x === wallAnchor.x && end.y === wallAnchor.y) {
-        setWallAnchor(null);
-        return;
-      }
-      autoFillRun(wallAnchor, end);
-      return;
+    if (drawingTool) {
+      placeAtNode(nearestNode(point.x, point.y));
+      return true;
     }
 
     if (tool === 'panel') {
@@ -267,16 +427,163 @@ export function DesignCanvas({ validation, stageRef }: Props) {
       };
       if (wouldOverlap(plan.panels, candidate)) {
         notify('That 2 ft of wall is already covered by another panel.', 'error');
-        return;
+        return true;
       }
       if (!isInsidePlot(plan.plot, candidate)) {
         notify('Panels must stay inside the plot boundary.', 'error');
-        return;
+        return true;
       }
       addPanels([candidate]);
+      return true;
+    }
+    return false;
+  };
+
+  const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    const stage = e.target.getStage();
+    if (!stage) return;
+    const point = readPointer(stage);
+    if (!point) return;
+    setHoverNode(nearestNode(point.x, point.y));
+    setHoverEdge(nearestEdge(point.x, point.y));
+    const units = { x: point.x / PX_PER_UNIT, y: point.y / PX_PER_UNIT };
+    setHoverRaw(units);
+    updateDraw(point);
+    if (marqueeStart.current) {
+      const rect = rectBetween(marqueeStart.current, units);
+      marqueeRect.current = rect;
+      setMarquee(rect);
+    }
+  };
+
+  /**
+   * A tap, which on a touchscreen is what a click is on a desktop.
+   *
+   * It must be `tap` rather than `touchstart`: with the stage draggable, a
+   * finger that moves pans the drawing, and Konva only fires `tap` when it
+   * did not. So a drag moves the plan and a tap places - no mode toggle, and
+   * the wall tool already worked by tapping twice.
+   */
+  /** A finger going down: in a drawing tool this opens a drag. */
+  const handleTouchStart = (e: Konva.KonvaEventObject<TouchEvent>) => {
+    lastTouchAt.current = Date.now();
+    const stage = e.target.getStage();
+    if (!stage || e.target !== stage) return;
+    if (!drawingTool || calibration.active) return;
+    const point = readPointer(stage);
+    if (point) beginDraw(point);
+  };
+
+  const handleTouchEnd = () => {
+    endPinch();
+    finishDraw();
+  };
+
+  const handleTap = (e: Konva.KonvaEventObject<TouchEvent>) => {
+    lastTouchAt.current = Date.now();
+    const stage = e.target.getStage();
+    if (!stage || e.target !== stage) return;
+    // The drawing tools are driven by touchstart/touchend above; a tap there
+    // would place a second time.
+    if (drawingTool) return;
+    const point = readPointer(stage);
+    if (!point) return;
+
+    // A finger cannot hover, so the previews have nothing to follow between
+    // taps. Seeding them from the tap at least shows the anchor and the run
+    // once the first point is down.
+    setHoverRaw({ x: point.x / PX_PER_UNIT, y: point.y / PX_PER_UNIT });
+    setHoverNode(nearestNode(point.x, point.y));
+    setHoverEdge(nearestEdge(point.x, point.y));
+
+    if (placeAt(point)) return;
+    clearSelection();
+  };
+
+  /**
+   * Two fingers: pinch to zoom and move to pan, in one gesture.
+   *
+   * The zoom is anchored on the midpoint between the fingers, so the drawing
+   * grows around the gesture instead of sliding out from under it, and the
+   * midpoint's own movement is added on as the pan. Konva would otherwise
+   * keep dragging the stage with the first finger, so that drag is stopped
+   * the moment a second one lands.
+   */
+  const handleTouchMove = (e: Konva.KonvaEventObject<TouchEvent>) => {
+    lastTouchAt.current = Date.now();
+    const stage = e.target.getStage();
+    if (!stage) return;
+    const pointers = stage.getPointersPositions();
+    if (pointers.length < 2) {
+      const point = readPointer(stage);
+      if (point) {
+        updateDraw(point);
+        setHoverNode(nearestNode(point.x, point.y));
+      }
+      return;
+    }
+    // A second finger means the gesture was a pinch all along, not a wall.
+    draw.current = null;
+    setDrawPreview(null);
+
+    if (e.evt.cancelable) e.evt.preventDefault();
+    if (stage.isDragging()) stage.stopDrag();
+
+    const [a, b] = pointers;
+    const distance = pointerDistance(a, b);
+    const mid = midpoint(a, b);
+    const previous = pinch.current;
+    pinch.current = { distance, mid };
+    if (!previous) return;
+
+    setViewport((current) => {
+      const zoomed = zoomBy(current, mid, pinchFactor(previous.distance, distance));
+      return {
+        ...zoomed,
+        x: zoomed.x + (mid.x - previous.mid.x),
+        y: zoomed.y + (mid.y - previous.mid.y),
+      };
+    });
+  };
+
+  /** Lifting either finger ends the pinch; the next one starts a fresh span. */
+  const endPinch = () => {
+    pinch.current = null;
+  };
+
+  const GHOST_MOUSE_MS = 700;
+
+  const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (Date.now() - lastTouchAt.current < GHOST_MOUSE_MS) return;
+    const stage = e.target.getStage();
+    if (!stage) return;
+
+    // Right and middle drag pan from anywhere, including over a panel and
+    // mid-draw, which is what the 3D view has always done.
+    if (e.evt.button === 1 || e.evt.button === 2) {
+      e.evt.preventDefault();
+      setDragging(true);
+      panStart.current = {
+        screenX: e.evt.clientX,
+        screenY: e.evt.clientY,
+        x: stage.x(),
+        y: stage.y(),
+      };
       return;
     }
 
+    if (e.target !== stage || e.evt.button !== 0) return;
+    const point = readPointer(stage);
+    if (!point) return;
+
+    // A drawing tool waits for the release: a press that moves is a drag out
+    // to the far corner, and one that does not is the first of two taps.
+    if (drawingTool && !calibration.active) {
+      beginDraw(point);
+      return;
+    }
+
+    if (placeAt(point)) return;
     if (marqueeArmed) {
       const units = { x: point.x / PX_PER_UNIT, y: point.y / PX_PER_UNIT };
       marqueeStart.current = { ...units, additive: e.evt.shiftKey };
@@ -326,28 +633,80 @@ export function DesignCanvas({ validation, stageRef }: Props) {
     select(start.additive ? [...new Set([...selection, ...hits])] : hits);
   };
 
+  /**
+   * The wheel, which on a laptop is a trackpad.
+   *
+   * A two-finger scroll moves the drawing and a pinch zooms it, the way every
+   * map-like tool behaves. Before this, every wheel event zoomed and `deltaX`
+   * was dropped on the floor - so a sideways swipe arrived with `deltaY` at 0
+   * and zoomed *in*, because that is the branch `deltaY > 0` falls to.
+   */
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
     const stage = e.target.getStage();
     const pointer = stage?.getPointerPosition();
     if (!pointer) return;
-    setViewport((current) => zoomAt(current, pointer, e.evt.deltaY));
+
+    const { deltaX, deltaY, deltaMode, ctrlKey, metaKey } = e.evt;
+    if (wheelIntent(ctrlKey, metaKey) === 'zoom') {
+      setViewport((current) => zoomAt(current, pointer, deltaY));
+      return;
+    }
+    // Scrolling down moves the content up, so the offsets are negated.
+    setViewport((current) =>
+      panBy(
+        current,
+        -normalizeWheelDelta(deltaX, deltaMode),
+        -normalizeWheelDelta(deltaY, deltaMode),
+      ),
+    );
   };
+
+  /**
+   * Screen position for the held panel's bubble: the middle of its top edge,
+   * in container pixels, clamped so a panel against an edge still shows one.
+   *
+   * The panel's own geometry rather than the touch point, so the bubble points
+   * at the thing it is about even after the finger has moved.
+   */
+  const heldBubblePosition = (() => {
+    if (!heldPanel) return undefined;
+    const rect = panelBoundsUnits(heldPanel);
+    const toScreen = (units: number, offset: number) =>
+      offset + units * PX_PER_UNIT * viewport.scale;
+    const MARGIN_PX = 12;
+    const BUBBLE_HALF_WIDTH_PX = 90;
+    return {
+      left: Math.min(
+        Math.max(toScreen(rect.x + rect.width / 2, viewport.x), BUBBLE_HALF_WIDTH_PX),
+        Math.max(BUBBLE_HALF_WIDTH_PX, size.width - BUBBLE_HALF_WIDTH_PX),
+      ),
+      top: Math.max(toScreen(rect.y, viewport.y) - MARGIN_PX, 60),
+    };
+  })();
 
   const cursor = calibration.active
     ? 'crosshair'
     : openingBrush
       ? 'cell'
       : panning
-        ? 'grab'
-        : tool === 'wall'
+        ? dragging
+          ? 'grabbing'
+          : 'grab'
+        : drawingTool
           ? 'crosshair'
           : tool === 'select'
             ? 'default'
             : 'copy';
 
   return (
-    <div ref={containerRef} className="relative h-full w-full bg-white" style={{ cursor }}>
+    <div
+      ref={containerRef}
+      className="relative h-full w-full bg-white"
+      // Without this the browser scrolls the page and zooms the whole document
+      // instead of letting the drawing have the gesture.
+      style={{ cursor, touchAction: 'none' }}
+    >
       <Stage
         ref={stageRef}
         width={size.width}
@@ -357,7 +716,9 @@ export function DesignCanvas({ validation, stageRef }: Props) {
         x={viewport.x}
         y={viewport.y}
         draggable={panning}
+        onDragStart={() => setDragging(true)}
         onDragEnd={(e) => {
+          setDragging(false);
           if (e.target !== e.target.getStage()) return;
           setViewport((current) => ({ ...current, x: e.target.x(), y: e.target.y() }));
         }}
@@ -368,7 +729,14 @@ export function DesignCanvas({ validation, stageRef }: Props) {
           setHoverRaw(null);
         }}
         onMouseDown={handleMouseDown}
-        onMouseUp={() => finishMarquee.current()}
+        onMouseUp={() => {
+          finishDraw();
+          finishMarquee.current();
+        }}
+        onTap={handleTap}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         onContextMenu={(e) => e.evt.preventDefault()}
         onWheel={handleWheel}
       >
@@ -394,7 +762,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
               scale={viewport.scale}
             />
           </Group>
-          <PlotShape plot={plan.plot} scale={viewport.scale} />
+          <PlotShape plot={plan.plot} scale={viewport.scale} unit={unit} />
         </Layer>
 
         {/* Floor and roof sit beneath the walls on their own plane. */}
@@ -407,6 +775,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
               flagged={validation.flaggedPanelIds.has(panel.id)}
               draggable={tool === 'select' && !openingBrush}
               onSelect={(id, additive) => select([id], additive)}
+              onHold={holdEnabled ? setHeldPanelId : undefined}
               onMoved={movePanel}
             />
           ))}
@@ -432,6 +801,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
                 if (converted) setPanelCategory(id, converted);
                 else select([id], additive);
               }}
+              onHold={holdEnabled ? setHeldPanelId : undefined}
               onMoved={movePanel}
             />
           ))}
@@ -439,15 +809,34 @@ export function DesignCanvas({ validation, stageRef }: Props) {
 
         <Layer listening={false}>
           <JunctionMarkers junctions={junctions} scale={viewport.scale} />
-          <RunDimensions panels={linearPanels} scale={viewport.scale} />
+          <RunDimensions panels={linearPanels} scale={viewport.scale} unit={unit} />
           <UncoveredArea issues={validation.errors} scale={viewport.scale} />
           <MarqueeBox rect={marquee} scale={viewport.scale} />
           <IssueMarkers issues={validation.errors} scale={viewport.scale} />
           {tool === 'wall' && (
             <WallPreview
-              anchor={wallAnchor}
-              cursor={hoverNode}
+              anchor={drawPreview ? drawPreview.start : wallAnchor}
+              cursor={drawPreview ? drawPreview.end : hoverNode}
               category={activeCategory}
+              scale={viewport.scale}
+              unit={unit}
+            />
+          )}
+          {tool === 'room' && (
+            <RoomPreview
+              start={drawPreview ? drawPreview.start : wallAnchor}
+              end={drawPreview ? drawPreview.end : hoverNode}
+              category={activeCategory}
+              scale={viewport.scale}
+              unit={unit}
+            />
+          )}
+          {/* Where the next point lands. Only while a drawing tool is armed:
+              everywhere else it would be a ring following the cursor for no
+              reason. */}
+          {drawingTool && (
+            <SnapRing
+              node={drawPreview ? drawPreview.end : hoverNode}
               scale={viewport.scale}
             />
           )}
@@ -455,6 +844,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
             from={calibration.active ? calibration.from : null}
             cursor={calibration.active ? hoverRaw : null}
             scale={viewport.scale}
+            unit={unit}
           />
           {tool === 'panel' && (
             <BrushPreview
@@ -467,23 +857,109 @@ export function DesignCanvas({ validation, stageRef }: Props) {
         </Layer>
       </Stage>
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between p-3 text-xs">
-        <span className="pointer-events-auto rounded bg-slate-900/80 px-2 py-1 font-mono text-white">
-          {hoverNode ? `${hoverNode.x * 2} ft, ${hoverNode.y * 2} ft` : '—'}
-        </span>
+      {/* Clear of the bottom sheet's handle, which owns the foot of the screen
+          on anything narrower than a laptop. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between p-3 pb-16 text-xs lg:pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="pointer-events-auto rounded bg-slate-900/80 px-2 py-1 font-mono text-white">
+            {hoverNode
+              ? `${formatLength(unitsToFt(hoverNode.x), unit)}, ${formatLength(
+                  unitsToFt(hoverNode.y),
+                  unit,
+                )}`
+              : '—'}
+          </span>
+          <AreaReadout areas={areas} unit={unit} />
+        </div>
         <span className="pointer-events-auto rounded bg-white/90 px-2 py-1 text-slate-600 ring-1 ring-slate-200">
-          Scroll to zoom &middot; drag to select &middot; Space or middle-drag to pan
+          {tool === 'pan'
+            ? coarsePointer
+              ? 'Drag to move the drawing \u00b7 pinch to zoom'
+              : 'Drag to move the drawing \u00b7 scroll to move \u00b7 pinch or \u2318-scroll to zoom'
+            : coarsePointer
+              ? drawingTool
+                ? 'Drag to draw \u00b7 two fingers to move and zoom'
+                : 'Drag to pan \u00b7 pinch to zoom \u00b7 tap to place or select'
+              : 'Scroll to move \u00b7 pinch to zoom \u00b7 right-drag or Space to pan'}
         </span>
       </div>
 
-      <button
-        type="button"
-        onClick={fitToPlot}
-        className="absolute right-3 top-3 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-        style={{ color: COLORS.label }}
-      >
-        Fit to plot
-      </button>
+      {heldPanel && (
+        <>
+          {/* Catches the dismissing tap. Deliberately not dimmed: the point of
+              putting this over the panel is that you can still see the panel. */}
+          <div className="absolute inset-0 z-40" onPointerDown={() => setHeldPanelId(null)} />
+          <div
+            className="absolute z-40 -translate-x-1/2 -translate-y-full"
+            style={heldBubblePosition}
+          >
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-lg">
+              <span className="whitespace-nowrap pl-1 text-xs text-slate-600">
+                {CATEGORY_STYLE[heldPanel.category].label}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setHeldPanelId(null);
+                  deleteSelection();
+                }}
+                className="min-h-11 rounded-md bg-red-600 px-3 text-sm font-medium text-white"
+              >
+                Delete
+              </button>
+            </div>
+            {/* The tail, pointing down at the panel. */}
+            <div className="mx-auto -mt-px h-2 w-3 bg-white [clip-path:polygon(0_0,100%_0,50%_100%)]" />
+          </div>
+        </>
+      )}
+
+      {/* Viewport controls. On a phone the tool list is behind the sheet, so
+          moving and zooming the drawing has to be reachable from the canvas
+          itself. The +/- buttons also give a mouse back the zoom it lost when
+          the wheel became a pan. */}
+      <div className="absolute right-3 top-3 flex items-start gap-1.5">
+        <button
+          type="button"
+          onClick={togglePan}
+          aria-pressed={tool === 'pan'}
+          aria-label="Move the map"
+          title="Move the map (H)"
+          className={`rounded border px-2.5 py-1.5 text-sm shadow-sm ${
+            tool === 'pan'
+              ? 'border-slate-900 bg-slate-900 text-white'
+              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          <HandIcon />
+        </button>
+        <div className="flex flex-col overflow-hidden rounded border border-slate-300 bg-white shadow-sm">
+          <button
+            type="button"
+            onClick={() => zoomStep(1.25)}
+            aria-label="Zoom in"
+            className="px-2.5 py-1.5 text-sm leading-none text-slate-700 hover:bg-slate-50"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={() => zoomStep(1 / 1.25)}
+            aria-label="Zoom out"
+            className="border-t border-slate-200 px-2.5 py-1.5 text-sm leading-none text-slate-700 hover:bg-slate-50"
+          >
+            &minus;
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={fitToPlot}
+          className="rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+          style={{ color: COLORS.label }}
+        >
+          Fit to plot
+        </button>
+      </div>
     </div>
   );
 }

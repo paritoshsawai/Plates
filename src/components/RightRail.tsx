@@ -1,6 +1,6 @@
 import { CATEGORY_STYLE } from '../core/panels';
 import { formatCurrency, isPlaceholderPricing } from '../core/pricing';
-import { formatFt } from '../core/units';
+import { formatLength } from '../core/units';
 import type { Bom, BomGroup, ValidationResult } from '../core/types';
 import { useStore } from '../state/store';
 import { SectionTitle } from './ui';
@@ -14,6 +14,7 @@ interface Props {
 export function RightRail({ bom, validation, onEditPricing }: Props) {
   const priceConfig = useStore((s) => s.priceConfig);
   const role = useStore((s) => s.role);
+  const unit = useStore((s) => s.unit);
   const select = useStore((s) => s.select);
   const setTool = useStore((s) => s.setTool);
 
@@ -111,11 +112,11 @@ export function RightRail({ bom, validation, onEditPricing }: Props) {
       <section>
         <SectionTitle>Material utilisation</SectionTitle>
         <dl className="space-y-1 text-xs text-slate-600">
-          <PlainRow label="Wall length" value={formatFt(bom.utilization.linearFt)} />
-          <PlainRow label="Offcut produced" value={`${bom.utilization.offcutFt} ft`} />
+          <PlainRow label="Wall length" value={formatLength(bom.utilization.linearFt, unit)} />
+          <PlainRow label="Offcut produced" value={formatLength(bom.utilization.offcutFt, unit)} />
           <PlainRow
             label="Offcut avoided"
-            value={formatFt(bom.utilization.offcutAvoidedFt)}
+            value={formatLength(bom.utilization.offcutAvoidedFt, unit)}
           />
           <PlainRow
             label="Panel optimality"
