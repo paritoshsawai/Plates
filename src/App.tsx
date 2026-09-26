@@ -14,6 +14,8 @@ import { buildBom } from './core/bom';
 import { EXPORT_HIDDEN, PX_PER_UNIT, planBoundsUnits } from './canvas/view';
 import { serializePlan } from './core/plan';
 import { validatePlan } from './core/validation';
+import { plotAreaSqFt } from './core/plot';
+import { footprintAreaSqFt, interiorCells } from './core/footprint';
 import { toWorkOrder } from './core/workorder';
 import { bomToCsv } from './export/csv';
 import {
@@ -47,9 +49,23 @@ export default function App() {
   const clearMessage = useStore((s) => s.clearMessage);
   const notify = useStore((s) => s.notify);
   const refreshSavedPlans = useStore((s) => s.refreshSavedPlans);
+  const unit = useStore((s) => s.unit);
 
-  const validation = useMemo(() => validatePlan(plan.panels, plan.plot), [plan.panels, plan.plot]);
+  const validation = useMemo(
+    () => validatePlan(plan.panels, plan.plot, unit),
+    [plan.panels, plan.plot, unit],
+  );
   const bom = useMemo(() => buildBom(plan.panels, priceConfig), [plan.panels, priceConfig]);
+
+  // Both views show these, so the flood fill runs once per change rather than
+  // once per view. `interiorCells` walks the whole wall bounding box.
+  const areas = useMemo(
+    () => ({
+      plotSqFt: plotAreaSqFt(plan.plot),
+      floorSqFt: footprintAreaSqFt(interiorCells(plan.panels)),
+    }),
+    [plan.plot, plan.panels],
+  );
 
   useEffect(() => {
     refreshSavedPlans();
@@ -244,7 +260,7 @@ export default function App() {
         const planImage = capturePlanImage();
         try {
           const { buildQuotePdf } = await import('./export/pdf');
-          buildQuotePdf({ plan, bom, priceConfig, validation, planImage }).save(
+          buildQuotePdf({ plan, bom, priceConfig, validation, planImage, unit }).save(
             `${slugify(plan.name)}-quote.pdf`,
           );
         } catch (error) {
@@ -255,7 +271,7 @@ export default function App() {
       csv() {
         void deliverText(
           'BOM CSV',
-          bomToCsv(plan, bom),
+          bomToCsv(plan, bom, unit),
           `${slugify(plan.name)}-bom.csv`,
           'text/csv;charset=utf-8',
         );
@@ -275,13 +291,13 @@ export default function App() {
         }
         void deliverText(
           'Work order JSON',
-          JSON.stringify(toWorkOrder(plan, bom), null, 2),
+          JSON.stringify(toWorkOrder(plan, bom, unit), null, 2),
           `${slugify(plan.name)}-work-order.json`,
           'application/json',
         );
       },
     }),
-    [plan, bom, priceConfig, validation, capturePlanImage, notify, deliverText],
+    [plan, bom, priceConfig, validation, unit, capturePlanImage, notify, deliverText],
   );
 
   return (
@@ -324,7 +340,7 @@ export default function App() {
           {/* The plan canvas stays mounted: unmounting Konva would lose the
               viewport, and the PDF export captures its stage. */}
           <div className={`relative min-h-0 flex-1 ${view === 'plan' ? '' : 'hidden'}`}>
-            <DesignCanvas validation={validation} stageRef={stageRef} />
+            <DesignCanvas validation={validation} areas={areas} stageRef={stageRef} />
             <CalibrationBanner />
           </div>
 
@@ -337,7 +353,7 @@ export default function App() {
                   </p>
                 }
               >
-                <ThreeView />
+                <ThreeView areas={areas} />
               </Suspense>
             </div>
           )}

@@ -8,6 +8,7 @@ import { tileRun } from '../core/tiling';
 import { bestTileFootprint, tileFootprint } from '../core/areaTiling';
 import { interiorCells } from '../core/footprint';
 import { GRID_FT } from '../core/units';
+import type { LengthUnit } from '../core/units';
 import type {
   GridPoint,
   Orientation,
@@ -19,7 +20,13 @@ import type {
   PriceConfig,
   Underlay,
 } from '../core/types';
-import { loadPriceConfig, localPlanRepository, savePriceConfig } from './storage';
+import {
+  loadPriceConfig,
+  loadUnit,
+  localPlanRepository,
+  savePriceConfig,
+  saveUnit,
+} from './storage';
 import type { PlanSummary } from './storage';
 
 export type Tool = 'select' | 'wall' | 'panel';
@@ -44,6 +51,12 @@ export interface AppState {
   priceConfig: PriceConfig;
   savedPlans: PlanSummary[];
   role: Role;
+  /**
+   * The unit lengths and areas are read and typed in. Presentation only - the
+   * model stays in feet and the 2 ft module never moves, so switching this can
+   * never change a panel count, a SKU or a price.
+   */
+  unit: LengthUnit;
 
   tool: Tool;
   /** Which panel the 'panel' tool places. */
@@ -81,6 +94,7 @@ export interface AppState {
   future: Doc[];
 
   setRole(role: Role): void;
+  setUnit(unit: LengthUnit): void;
   setTool(tool: Tool): void;
   setBrush(size: PanelSizeId): void;
   setActiveCategory(category: PanelCategory): void;
@@ -184,6 +198,7 @@ export const useStore = create<AppState>()((set, get) => {
     priceConfig: loadPriceConfig(),
     savedPlans: [],
     role: 'architect',
+    unit: loadUnit(),
 
     tool: 'wall',
     brush: '4x10',
@@ -204,6 +219,11 @@ export const useStore = create<AppState>()((set, get) => {
     setRole: (role) =>
       // A client may look but not edit, so drop them onto the read-only tool.
       set({ role, tool: role === 'client' ? 'select' : get().tool, selection: [], wallAnchor: null }),
+
+    setUnit: (unit) => {
+      saveUnit(unit);
+      set({ unit });
+    },
 
     setTool: (tool) =>
       set({

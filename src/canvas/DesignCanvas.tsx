@@ -36,6 +36,9 @@ import {
   visiblePanels,
 } from '../core/panels';
 import { detectJunctions } from '../core/junctions';
+import { formatLength, unitsToFt } from '../core/units';
+import { AreaReadout } from '../components/AreaReadout';
+import type { PlanAreas } from '../components/AreaReadout';
 import { useStore } from '../state/store';
 import { isLinearCategory } from '../core/types';
 import type { GridEdge, GridPoint, Panel, ValidationResult } from '../core/types';
@@ -43,10 +46,11 @@ import type { UnitRect } from '../core/panels';
 
 interface Props {
   validation: ValidationResult;
+  areas: PlanAreas;
   stageRef: React.RefObject<Konva.Stage | null>;
 }
 
-export function DesignCanvas({ validation, stageRef }: Props) {
+export function DesignCanvas({ validation, areas, stageRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [viewport, setViewport] = useState<Viewport>({ scale: 1, x: 80, y: 80 });
@@ -78,6 +82,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
   const setPanelCategory = useStore((s) => s.setPanelCategory);
   const hiddenLayers = useStore((s) => s.hiddenLayers);
   const calibration = useStore((s) => s.calibration);
+  const unit = useStore((s) => s.unit);
   const setCalibrationPoint = useStore((s) => s.setCalibrationPoint);
 
   const selectedIds = useMemo(() => new Set(selection), [selection]);
@@ -394,7 +399,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
               scale={viewport.scale}
             />
           </Group>
-          <PlotShape plot={plan.plot} scale={viewport.scale} />
+          <PlotShape plot={plan.plot} scale={viewport.scale} unit={unit} />
         </Layer>
 
         {/* Floor and roof sit beneath the walls on their own plane. */}
@@ -439,7 +444,7 @@ export function DesignCanvas({ validation, stageRef }: Props) {
 
         <Layer listening={false}>
           <JunctionMarkers junctions={junctions} scale={viewport.scale} />
-          <RunDimensions panels={linearPanels} scale={viewport.scale} />
+          <RunDimensions panels={linearPanels} scale={viewport.scale} unit={unit} />
           <UncoveredArea issues={validation.errors} scale={viewport.scale} />
           <MarqueeBox rect={marquee} scale={viewport.scale} />
           <IssueMarkers issues={validation.errors} scale={viewport.scale} />
@@ -449,12 +454,14 @@ export function DesignCanvas({ validation, stageRef }: Props) {
               cursor={hoverNode}
               category={activeCategory}
               scale={viewport.scale}
+              unit={unit}
             />
           )}
           <CalibrationOverlay
             from={calibration.active ? calibration.from : null}
             cursor={calibration.active ? hoverRaw : null}
             scale={viewport.scale}
+            unit={unit}
           />
           {tool === 'panel' && (
             <BrushPreview
@@ -468,9 +475,17 @@ export function DesignCanvas({ validation, stageRef }: Props) {
       </Stage>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between p-3 text-xs">
-        <span className="pointer-events-auto rounded bg-slate-900/80 px-2 py-1 font-mono text-white">
-          {hoverNode ? `${hoverNode.x * 2} ft, ${hoverNode.y * 2} ft` : '—'}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="pointer-events-auto rounded bg-slate-900/80 px-2 py-1 font-mono text-white">
+            {hoverNode
+              ? `${formatLength(unitsToFt(hoverNode.x), unit)}, ${formatLength(
+                  unitsToFt(hoverNode.y),
+                  unit,
+                )}`
+              : '—'}
+          </span>
+          <AreaReadout areas={areas} unit={unit} />
+        </div>
         <span className="pointer-events-auto rounded bg-white/90 px-2 py-1 text-slate-600 ring-1 ring-slate-200">
           Scroll to zoom &middot; drag to select &middot; Space or middle-drag to pan
         </span>

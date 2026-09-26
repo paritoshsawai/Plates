@@ -8,12 +8,24 @@
  */
 
 import { plotAreaSqFt } from './plot';
-import { WALL_HEIGHT_FT } from './units';
+import { WALL_HEIGHT_FT, areaToDisplay, toDisplay } from './units';
+import type { LengthUnit } from './units';
 import type { Bom, Plan } from './types';
 
 export interface WorkOrder {
-  orderSchemaVersion: 1;
+  orderSchemaVersion: 2;
   status: 'draft';
+  /**
+   * The unit every length and area below is expressed in.
+   *
+   * Schema 1 spelt the unit into the field names - `wallHeightFt` - which made
+   * them unusable the moment the tool could speak metres: a converted value
+   * under a key asserting feet is worse than no value at all. Version 2 names
+   * the measurements plainly and declares the unit once, here.
+   *
+   * Panel SKUs are untouched by it. `4x10` is a part number, not a dimension.
+   */
+  units: LengthUnit;
   plan: {
     id: string;
     name: string;
@@ -21,9 +33,9 @@ export interface WorkOrder {
     updatedAt: string;
   };
   site: {
-    plotAreaSqFt: number;
-    wallHeightFt: number;
-    wallLinearFt: number;
+    plotArea: number;
+    wallHeight: number;
+    wallLinear: number;
   };
   /** What the factory builds, category by category. */
   materials: Array<{ category: string; sku: string; description: string; qty: number }>;
@@ -40,17 +52,19 @@ export interface WorkOrder {
     total: number;
   };
   sustainability: {
-    offcutFt: number;
-    offcutAvoidedFt: number;
+    offcut: number;
+    offcutAvoided: number;
     panelOptimalityPercent: number;
   };
   generatedAt: string;
 }
 
-export function toWorkOrder(plan: Plan, bom: Bom): WorkOrder {
+export function toWorkOrder(plan: Plan, bom: Bom, units: LengthUnit = 'ft'): WorkOrder {
+  const len = (ft: number) => Math.round(toDisplay(ft, units) * 1e4) / 1e4;
   return {
-    orderSchemaVersion: 1,
+    orderSchemaVersion: 2,
     status: 'draft',
+    units,
     plan: {
       id: plan.id,
       name: plan.name,
@@ -58,9 +72,9 @@ export function toWorkOrder(plan: Plan, bom: Bom): WorkOrder {
       updatedAt: plan.updatedAt,
     },
     site: {
-      plotAreaSqFt: plotAreaSqFt(plan.plot),
-      wallHeightFt: WALL_HEIGHT_FT,
-      wallLinearFt: bom.utilization.linearFt,
+      plotArea: Math.round(areaToDisplay(plotAreaSqFt(plan.plot), units) * 1e4) / 1e4,
+      wallHeight: len(WALL_HEIGHT_FT),
+      wallLinear: len(bom.utilization.linearFt),
     },
     materials: bom.lines
       .filter((line) => line.qty > 0)
@@ -88,8 +102,8 @@ export function toWorkOrder(plan: Plan, bom: Bom): WorkOrder {
       total: bom.cost.total,
     },
     sustainability: {
-      offcutFt: bom.utilization.offcutFt,
-      offcutAvoidedFt: bom.utilization.offcutAvoidedFt,
+      offcut: len(bom.utilization.offcutFt),
+      offcutAvoided: len(bom.utilization.offcutAvoidedFt),
       panelOptimalityPercent: bom.utilization.optimalityPercent,
     },
     generatedAt: new Date().toISOString(),

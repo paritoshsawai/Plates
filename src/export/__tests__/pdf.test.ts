@@ -6,6 +6,7 @@ import { createPlan } from '../../core/plan';
 import { validatePlan } from '../../core/validation';
 import { DEFAULT_PRICE_CONFIG, formatCurrencyAscii } from '../../core/pricing';
 import { tileRun } from '../../core/tiling';
+import type { LengthUnit } from '../../core/units';
 import type { Panel, PriceConfig } from '../../core/types';
 
 /**
@@ -105,6 +106,7 @@ function quoteFor(
   panels: Panel[],
   config: PriceConfig = DEFAULT_PRICE_CONFIG,
   planImage: string | null = null,
+  unit: LengthUnit = 'ft',
 ) {
   const plan = { ...createPlan('Test plan'), panels };
   const bom = buildBom(panels, config);
@@ -112,8 +114,9 @@ function quoteFor(
     plan,
     bom,
     priceConfig: config,
-    validation: validatePlan(panels, plan.plot),
+    validation: validatePlan(panels, plan.plot, unit),
     planImage,
+    unit,
   });
   return { bom, doc, items: textItems(doc.output('arraybuffer') as ArrayBuffer as never) };
 }
@@ -206,5 +209,38 @@ describe('the placeholder-pricing caveat', () => {
     const text = allText(onPage(quoteFor(room(6, 5), real).items));
     expect(text).not.toContain('Indicative only');
     expect(text).toContain('Price schedule effective');
+  });
+});
+
+describe('a metric quote', () => {
+  it('measures the site in square metres', () => {
+    const text = allText(onPage(quoteFor(room(6, 5), DEFAULT_PRICE_CONFIG, null, 'm').items));
+    expect(text).toContain('m\u00b2');
+    expect(text).not.toContain('sq ft');
+  });
+
+  it('names the linear column in metres', () => {
+    const text = allText(onPage(quoteFor(room(6, 5), DEFAULT_PRICE_CONFIG, null, 'm').items));
+    expect(text).toContain('Linear m');
+  });
+
+  it('gives the wall height in metres, not feet', () => {
+    const text = allText(onPage(quoteFor(room(6, 5), DEFAULT_PRICE_CONFIG, null, 'm').items));
+    expect(text).toContain('3.05 m');
+  });
+
+  it('still quotes the same money as the imperial one', () => {
+    // The guarantee: a unit is how the quote reads, never what it costs.
+    const metric = quoteFor(room(6, 5), DEFAULT_PRICE_CONFIG, null, 'm');
+    const imperial = quoteFor(room(6, 5), DEFAULT_PRICE_CONFIG, null, 'ft');
+    expect(metric.bom.cost.total).toBe(imperial.bom.cost.total);
+    expect(allText(onPage(metric.items))).toContain(
+      formatCurrencyAscii(imperial.bom.cost.total),
+    );
+  });
+
+  it('leaves the SKU column as part numbers', () => {
+    const text = allText(onPage(quoteFor(room(6, 5), DEFAULT_PRICE_CONFIG, null, 'm').items));
+    expect(text).toContain('4x10');
   });
 });

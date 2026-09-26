@@ -17,6 +17,8 @@ import {
 } from './controls';
 import type { Orbit } from './controls';
 import { useStore } from '../state/store';
+import { AreaReadout } from '../components/AreaReadout';
+import type { PlanAreas } from '../components/AreaReadout';
 import { CATEGORY_STYLE, resolveOpeningClick, visiblePanels } from '../core/panels';
 import type { Panel } from '../core/types';
 
@@ -42,7 +44,7 @@ function cloneOrbit(orbit: Orbit): Orbit {
   return { ...orbit, target: orbit.target.clone() };
 }
 
-export default function ThreeView() {
+export default function ThreeView({ areas }: { areas: PlanAreas }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const allPanels = useStore((s) => s.plan.panels);
   const hiddenLayers = useStore((s) => s.hiddenLayers);
@@ -55,6 +57,7 @@ export default function ThreeView() {
   const selection = useStore((s) => s.selection);
   const select = useStore((s) => s.select);
   const openingBrush = useStore((s) => s.openingBrush);
+  const unit = useStore((s) => s.unit);
   const setPanelCategory = useStore((s) => s.setPanelCategory);
 
   // Kept in refs so the render loop is set up once and never torn down by a
@@ -471,7 +474,11 @@ export default function ThreeView() {
         ))}
       </div>
 
-      <p className="pointer-events-none absolute inset-x-0 bottom-0 p-3 text-center text-xs text-slate-500">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col items-center gap-1.5 p-3 text-xs">
+        <AreaReadout areas={areas} unit={unit} />
+      </div>
+
+      <p className="pointer-events-none absolute inset-x-0 bottom-10 p-3 text-center text-xs text-slate-500">
         Drag to orbit &middot; right-drag, middle-drag or shift-drag to pan &middot; scroll to zoom
         at the cursor &middot;{' '}
         {openingBrush

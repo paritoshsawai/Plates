@@ -1,17 +1,19 @@
 import { Fragment } from 'react';
 import { Line, Text } from 'react-konva';
 import { plotEdgeLengthsFt } from '../core/plot';
-import { formatFt } from '../core/units';
+import { formatLength } from '../core/units';
+import type { LengthUnit } from '../core/units';
 import type { Plot } from '../core/types';
 import { COLORS, PX_PER_UNIT } from './view';
 
 interface Props {
   plot: Plot;
   scale: number;
+  unit: LengthUnit;
 }
 
-/** The parcel: a filled rectilinear ring with each edge dimensioned in feet. */
-export function PlotShape({ plot, scale }: Props) {
+/** The parcel: a filled rectilinear ring with each edge dimensioned. */
+export function PlotShape({ plot, scale, unit }: Props) {
   const points = plot.vertices.flatMap((v) => [v.x * PX_PER_UNIT, v.y * PX_PER_UNIT]);
   const lengths = plotEdgeLengthsFt(plot);
   const fontSize = Math.max(9, 12 / scale);
@@ -39,7 +41,7 @@ export function PlotShape({ plot, scale }: Props) {
               y={midY - (horizontal ? fontSize * 1.6 : fontSize / 2)}
               width={80}
               align={horizontal ? 'center' : 'left'}
-              text={formatFt(lengths[i])}
+              text={formatLength(lengths[i], unit)}
               fontSize={fontSize}
               fontFamily="ui-monospace, monospace"
               fill={COLORS.plotStroke}

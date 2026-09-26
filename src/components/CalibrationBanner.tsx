@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { GRID_FT, formatFt } from '../core/units';
+import { GRID_FT, formatLength, fromDisplay, inputStep } from '../core/units';
 import { useStore } from '../state/store';
 import { Button, NumberInput } from './ui';
 
@@ -13,7 +13,10 @@ export function CalibrationBanner() {
   const calibration = useStore((s) => s.calibration);
   const cancelCalibration = useStore((s) => s.cancelCalibration);
   const applyCalibration = useStore((s) => s.applyCalibration);
-  const [realFeet, setRealFeet] = useState(20);
+  const unit = useStore((s) => s.unit);
+  // Held in the reader's own unit and converted once on Apply, so typing is
+  // never fighting a round-trip through feet.
+  const [realLength, setRealLength] = useState(() => (unit === 'm' ? 6 : 20));
 
   if (!calibration.active) return null;
 
@@ -35,14 +38,23 @@ export function CalibrationBanner() {
         {ready ? (
           <>
             <p className="mt-1 text-xs text-slate-500">
-              That span currently reads {formatFt(Math.round(spanUnits * GRID_FT * 10) / 10)}.
-              Type its real length and the scan is rescaled to match.
+              That span currently reads {formatLength(spanUnits * GRID_FT, unit)}. Type its real
+              length and the scan is rescaled to match.
             </p>
             <div className="mt-2 flex items-end gap-2">
               <div className="flex-1">
-                <NumberInput value={realFeet} onChange={setRealFeet} min={1} step={1} suffix="ft" />
+                <NumberInput
+                  value={realLength}
+                  onChange={setRealLength}
+                  min={inputStep(unit)}
+                  step={inputStep(unit)}
+                  suffix={unit}
+                />
               </div>
-              <Button variant="primary" onClick={() => applyCalibration(realFeet)}>
+              <Button
+                variant="primary"
+                onClick={() => applyCalibration(fromDisplay(realLength, unit))}
+              >
                 Apply
               </Button>
               <Button onClick={cancelCalibration}>Cancel</Button>

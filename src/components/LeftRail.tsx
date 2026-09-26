@@ -7,7 +7,7 @@ import {
   PLACEABLE_CATEGORIES,
 } from '../core/panels';
 import type { PanelCategory } from '../core/types';
-import { GRID_FT, WALL_HEIGHT_FT, formatFt } from '../core/units';
+import { GRID_FT, WALL_HEIGHT_FT, formatArea, formatLength } from '../core/units';
 import { plotAreaSqFt, plotEdgeLengthsFt } from '../core/plot';
 import { useStore } from '../state/store';
 import { Button, SectionTitle } from './ui';
@@ -54,6 +54,7 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
 
   const readOnly = role === 'client';
   const edges = plotEdgeLengthsFt(plot);
+  const unit = useStore((s) => s.unit);
 
   return (
     <aside className="flex w-full shrink-0 flex-col gap-5 border-t border-slate-200 bg-white p-4 lg:w-60 lg:overflow-y-auto lg:border-t-0 lg:border-r">
@@ -337,9 +338,9 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
       <section>
         <SectionTitle>Plot</SectionTitle>
         <dl className="space-y-1 text-xs text-slate-600">
-          <Row label="Area" value={`${plotAreaSqFt(plot).toLocaleString('en-IN')} sq ft`} />
-          <Row label="Boundary" value={edges.map((e) => formatFt(e)).join(' × ')} />
-          <Row label="Wall height" value={formatFt(WALL_HEIGHT_FT)} />
+          <Row label="Area" value={formatArea(plotAreaSqFt(plot), unit)} />
+          <Row label="Boundary" value={edges.map((e) => formatLength(e, unit)).join(' × ')} />
+          <Row label="Wall height" value={formatLength(WALL_HEIGHT_FT, unit)} />
         </dl>
         {!readOnly && (
           <div className="mt-2 flex flex-wrap gap-1.5">

@@ -132,8 +132,8 @@ describe('toWorkOrder', () => {
       { category: 'wall', sku: '4x10', description: 'Wall panel 4 ft x 10 ft', qty: 18 },
       { category: 'connector', sku: 'corner', description: 'Corner connector', qty: 4 },
     ]);
-    expect(order.site.wallLinearFt).toBe(72);
-    expect(order.site.wallHeightFt).toBe(10);
+    expect(order.site.wallLinear).toBe(72);
+    expect(order.site.wallHeight).toBe(10);
     expect(order.pricing.effectiveDate).toBe(DEFAULT_PRICE_CONFIG.effectiveDate);
     expect(order.pricing.panels).toBe(18 * 20);
     expect(order.pricing.connectors).toBe(bom.cost.connectors);

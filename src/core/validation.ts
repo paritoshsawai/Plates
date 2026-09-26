@@ -12,7 +12,8 @@ import { containsPoint, containsSegment } from './plot';
 import { interiorCells } from './footprint';
 import { isLinearCategory } from './types';
 import { AREA_CATEGORIES } from './types';
-import { unitsToFt } from './units';
+import { formatArea, formatLength, unitsToFt } from './units';
+import type { LengthUnit } from './units';
 import { buildEdgeIndex, buildNodeIndex, countComponents } from './walls';
 import type { Panel, PanelCategory, Plot, ValidationIssue, ValidationResult } from './types';
 
@@ -24,7 +25,17 @@ function emptyResult(issues: ValidationIssue[], manufacturable: boolean): Valida
   return { issues, errors, warnings, manufacturable, flaggedPanelIds };
 }
 
-export function validatePlan(panels: Panel[], plot: Plot): ValidationResult {
+/**
+ * `unit` decides how *measured* quantities read back - a position, an area.
+ * It never touches the module: "2 ft grid", "2 ft of wall" and "10 ft panel"
+ * name what Arplace manufactures, and stay in feet in every unit. It defaults
+ * to feet so a caller that does not care need not say.
+ */
+export function validatePlan(
+  panels: Panel[],
+  plot: Plot,
+  unit: LengthUnit = 'ft',
+): ValidationResult {
   const issues: ValidationIssue[] = [];
 
   if (panels.length === 0) {
@@ -119,9 +130,10 @@ export function validatePlan(panels: Panel[], plot: Plot): ValidationResult {
       issues.push({
         code: 'open-end',
         severity: 'error',
-        message: `Open wall end at (${unitsToFt(info.point.x)} ft, ${unitsToFt(
-          info.point.y,
-        )} ft). Close the run or remove the stub.`,
+        message: `Open wall end at (${formatLength(unitsToFt(info.point.x), unit)}, ${formatLength(
+          unitsToFt(info.point.y),
+          unit,
+        )}). Close the run or remove the stub.`,
         panelIds: [...info.panelIds],
         at: info.point,
       });
@@ -142,7 +154,7 @@ export function validatePlan(panels: Panel[], plot: Plot): ValidationResult {
 
   // 6. Area categories, each on its own plane.
   for (const category of AREA_CATEGORIES) {
-    issues.push(...validateArea(panels, plot, category));
+    issues.push(...validateArea(panels, plot, category, unit));
   }
 
   const hasErrors = issues.some((i) => i.severity === 'error');
@@ -153,7 +165,12 @@ export function validatePlan(panels: Panel[], plot: Plot): ValidationResult {
  * Floor and roof checks. These run per category, because a floor and a roof
  * over the same room share every cell and that is correct, not a collision.
  */
-function validateArea(panels: Panel[], plot: Plot, category: PanelCategory): ValidationIssue[] {
+function validateArea(
+  panels: Panel[],
+  plot: Plot,
+  category: PanelCategory,
+  unit: LengthUnit,
+): ValidationIssue[] {
   const area = panels.filter((panel) => panel.category === category);
   if (area.length === 0) return [];
 
@@ -210,7 +227,10 @@ function validateArea(panels: Panel[], plot: Plot, category: PanelCategory): Val
     issues.push({
       code: 'area-incomplete',
       severity: 'error',
-      message: `${missing.length * 4} sq ft of the building has no ${category}. A 10 ft panel cannot reach a strip shallower than 10 ft - resize that part of the building, or clear the ${category}.`,
+      message: `${formatArea(
+        missing.length * 4,
+        unit,
+      )} of the building has no ${category}. A 10 ft panel cannot reach a strip shallower than 10 ft - resize that part of the building, or clear the ${category}.`,
       panelIds: [],
       cells: missing,
     });

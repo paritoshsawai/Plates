@@ -3,7 +3,8 @@ import { Circle, Line, Rect, Text } from 'react-konva';
 import { buildEdgeIndex, collinearRuns } from '../core/walls';
 import { minPanelCount, tilingSequence } from '../core/tiling';
 import { categoryColor, getPanelSpec } from '../core/panels';
-import { formatFt, unitsToFt } from '../core/units';
+import { formatLength, unitsToFt } from '../core/units';
+import type { LengthUnit } from '../core/units';
 import type { GridPoint, Panel, PanelCategory, PanelSizeId, ValidationIssue } from '../core/types';
 import type { Junction } from '../core/junctions';
 import { COLORS, PX_PER_UNIT, WALL_PX } from './view';
@@ -11,6 +12,7 @@ import { COLORS, PX_PER_UNIT, WALL_PX } from './view';
 interface DimensionProps {
   panels: Panel[];
   scale: number;
+  unit: LengthUnit;
 }
 
 /**
@@ -18,7 +20,7 @@ interface DimensionProps {
  * dimensions without measuring. Runs shorter than 2 units are left unlabelled;
  * the label would be wider than the wall.
  */
-export function RunDimensions({ panels, scale }: DimensionProps) {
+export function RunDimensions({ panels, scale, unit }: DimensionProps) {
   const runs = collinearRuns(buildEdgeIndex(panels));
   const fontSize = Math.max(8, 11 / scale);
 
@@ -41,7 +43,7 @@ export function RunDimensions({ panels, scale }: DimensionProps) {
             y={y}
             width={72}
             align={horizontal ? 'center' : 'left'}
-            text={formatFt(unitsToFt(run.lengthUnits))}
+            text={formatLength(unitsToFt(run.lengthUnits), unit)}
             fontSize={fontSize}
             fontStyle="bold"
             fontFamily="ui-monospace, monospace"
@@ -180,6 +182,7 @@ interface PreviewProps {
   cursor: GridPoint | null;
   category: PanelCategory;
   scale: number;
+  unit: LengthUnit;
 }
 
 /**
@@ -187,7 +190,7 @@ interface PreviewProps {
  * drawn panel by panel with its length and panel count. The architect sees the
  * BOM consequence of the wall before committing to it.
  */
-export function WallPreview({ anchor, cursor, category, scale }: PreviewProps) {
+export function WallPreview({ anchor, cursor, category, scale, unit }: PreviewProps) {
   if (!anchor) return null;
 
   if (!cursor) {
@@ -265,7 +268,9 @@ export function WallPreview({ anchor, cursor, category, scale }: PreviewProps) {
             y={((axis === 'h' ? start.y : start.y + lengthUnits / 2) * PX_PER_UNIT) - fontSize * 2.2}
             width={120}
             align="center"
-            text={`${formatFt(unitsToFt(lengthUnits))} · ${minPanelCount(lengthUnits) ?? '?'} panels`}
+            text={`${formatLength(unitsToFt(lengthUnits), unit)} · ${
+              minPanelCount(lengthUnits) ?? '?'
+            } panels`}
             fontSize={fontSize}
             fontStyle="bold"
             fontFamily="ui-monospace, monospace"

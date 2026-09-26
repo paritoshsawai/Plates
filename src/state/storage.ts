@@ -9,6 +9,7 @@
 
 import { parsePlan } from '../core/plan';
 import { normalizePriceConfig } from '../core/pricing';
+import type { LengthUnit } from '../core/units';
 import type { Plan, PriceConfig } from '../core/types';
 
 export interface PlanSummary {
@@ -28,6 +29,7 @@ export interface PlanRepository {
 
 const PLANS_KEY = 'arplace.panel-studio.plans.v1';
 const PRICES_KEY = 'arplace.panel-studio.prices.v1';
+const UNIT_KEY = 'arplace.panel-studio.unit.v1';
 
 function readStore(): Record<string, unknown> {
   try {
@@ -108,5 +110,29 @@ export function savePriceConfig(config: PriceConfig): void {
     localStorage.setItem(PRICES_KEY, JSON.stringify(config));
   } catch (error) {
     console.warn('Could not persist the price schedule locally.', error);
+  }
+}
+
+/**
+ * The unit the reader wants, remembered per browser.
+ *
+ * Deliberately *not* stored in the plan: it is a preference of whoever is
+ * looking, not a property of the building. A plan sent to a colleague who
+ * works in metres opens in metres for them and in feet for its author, and no
+ * plan schema had to change to allow that.
+ */
+export function loadUnit(): LengthUnit {
+  try {
+    return localStorage.getItem(UNIT_KEY) === 'm' ? 'm' : 'ft';
+  } catch {
+    return 'ft';
+  }
+}
+
+export function saveUnit(unit: LengthUnit): void {
+  try {
+    localStorage.setItem(UNIT_KEY, unit);
+  } catch (error) {
+    console.warn('Could not remember the unit preference locally.', error);
   }
 }

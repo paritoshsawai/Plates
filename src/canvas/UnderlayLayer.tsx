@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Circle, Image as KonvaImage, Line, Text } from 'react-konva';
-import { formatFt } from '../core/units';
+import { GRID_FT, formatLength } from '../core/units';
+import type { LengthUnit } from '../core/units';
 import type { GridPoint, Underlay } from '../core/types';
 import { COLORS, PX_PER_UNIT } from './view';
 
@@ -58,6 +59,7 @@ interface CalibrationProps {
   from: GridPoint | null;
   cursor: GridPoint | null;
   scale: number;
+  unit: LengthUnit;
 }
 
 /**
@@ -65,7 +67,7 @@ interface CalibrationProps {
  * Shows the distance in the plan's own units as it is dragged, so the
  * architect can see what they are about to declare.
  */
-export function CalibrationOverlay({ from, cursor, scale }: CalibrationProps) {
+export function CalibrationOverlay({ from, cursor, scale, unit }: CalibrationProps) {
   if (!from) return null;
   const fontSize = Math.max(9, 12 / scale);
 
@@ -103,8 +105,9 @@ export function CalibrationOverlay({ from, cursor, scale }: CalibrationProps) {
             y={((from.y + cursor.y) / 2) * PX_PER_UNIT - fontSize * 2}
             width={120}
             align="center"
-            text={`${formatFt(
-              Math.round(Math.hypot(cursor.x - from.x, cursor.y - from.y) * 2 * 10) / 10,
+            text={`${formatLength(
+              Math.hypot(cursor.x - from.x, cursor.y - from.y) * GRID_FT,
+              unit,
             )} at current scale`}
             fontSize={fontSize}
             fontStyle="bold"

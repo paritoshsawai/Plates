@@ -18,7 +18,8 @@ import { jsPDF } from 'jspdf';
 import { lineLinearFt } from '../core/bom';
 import { plotAreaSqFt } from '../core/plot';
 import { formatCurrencyAscii, isPlaceholderPricing, toPdfSafeText } from '../core/pricing';
-import { WALL_HEIGHT_FT, formatFt } from '../core/units';
+import { WALL_HEIGHT_FT, formatArea, formatLength, toDisplay } from '../core/units';
+import type { LengthUnit } from '../core/units';
 import type { Bom, Plan, PriceConfig, ValidationResult } from '../core/types';
 
 const MARGIN = 14;
@@ -85,6 +86,12 @@ function ensureSpace(doc: jsPDF, y: number, needed: number): number {
   return MARGIN;
 }
 
+/** A table cell whose unit is named by its column header, so the cell is bare. */
+function formatLinear(ft: number | null, unit: LengthUnit): string {
+  if (ft === null) return '';
+  return String(Math.round(toDisplay(ft, unit) * 100) / 100);
+}
+
 export interface QuoteInput {
   plan: Plan;
   bom: Bom;
@@ -92,9 +99,21 @@ export interface QuoteInput {
   validation: ValidationResult;
   /** PNG data URL of the canvas, or null when the drawing is unavailable. */
   planImage: string | null;
+  /**
+   * The unit the quote reads in. Measured quantities convert; the SKU column
+   * does not - `4x10` is the part number the factory picks, not a dimension.
+   */
+  unit?: LengthUnit;
 }
 
-export function buildQuotePdf({ plan, bom, priceConfig, validation, planImage }: QuoteInput): jsPDF {
+export function buildQuotePdf({
+  plan,
+  bom,
+  priceConfig,
+  validation,
+  planImage,
+  unit = 'ft',
+}: QuoteInput): jsPDF {
   // compress keeps the embedded plan bitmap from dominating the file size.
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -174,16 +193,16 @@ export function buildQuotePdf({ plan, bom, priceConfig, validation, planImage }:
   // --- Site ----------------------------------------------------------------
   y = section(doc, y, pageWidth, 'Site', 3);
   y = keyValues(doc, y, pageWidth, [
-    ['Plot area', `${plotAreaSqFt(plan.plot).toLocaleString('en-IN')} sq ft`],
-    ['Wall height', formatFt(WALL_HEIGHT_FT)],
-    ['Wall length', formatFt(bom.utilization.linearFt)],
+    ['Plot area', formatArea(plotAreaSqFt(plan.plot), unit)],
+    ['Wall height', formatLength(WALL_HEIGHT_FT, unit)],
+    ['Wall length', formatLength(bom.utilization.linearFt, unit)],
   ]);
   y += 5;
 
   // --- Bill of materials ---------------------------------------------------
   y = section(doc, y, pageWidth, 'Bill of materials', 3);
   y = table(doc, y, pageWidth, {
-    headers: ['SKU', 'Description', 'Qty', 'Linear ft', 'Unit price', 'Line total'],
+    headers: ['SKU', 'Description', 'Qty', `Linear ${unit}`, 'Unit price', 'Line total'],
     // Each category carries its own subtotal, so a quote reads as wall, floor
     // and roof rather than one undifferentiated list.
     rows: bom.groups.flatMap((group) => [
@@ -192,7 +211,7 @@ export function buildQuotePdf({ plan, bom, priceConfig, validation, planImage }:
           line.sku,
           line.description,
           String(line.qty),
-          lineLinearFt(line) === null ? '' : String(lineLinearFt(line)),
+          formatLinear(lineLinearFt(line), unit),
           formatCurrencyAscii(line.unitPrice),
           formatCurrencyAscii(line.lineTotal),
         ],
@@ -213,7 +232,7 @@ export function buildQuotePdf({ plan, bom, priceConfig, validation, planImage }:
       '',
       'Total',
       String(bom.totalPanels + bom.totalConnectors),
-      formatFt(bom.utilization.linearFt),
+      formatLinear(bom.utilization.linearFt, unit),
       '',
       formatCurrencyAscii(bom.cost.panels + bom.cost.connectors),
     ],
@@ -260,8 +279,11 @@ export function buildQuotePdf({ plan, bom, priceConfig, validation, planImage }:
   // --- Material utilisation ------------------------------------------------
   y = section(doc, y, pageWidth, 'Material utilisation', 3);
   keyValues(doc, y, pageWidth, [
-    ['Offcut produced', `${bom.utilization.offcutFt} ft - panels are laid whole, never cut`],
-    ['Offcut avoided vs cut-to-fit', formatFt(bom.utilization.offcutAvoidedFt)],
+    [
+      'Offcut produced',
+      `${formatLength(bom.utilization.offcutFt, unit)} - panels are laid whole, never cut`,
+    ],
+    ['Offcut avoided vs cut-to-fit', formatLength(bom.utilization.offcutAvoidedFt, unit)],
     [
       'Panel optimality',
       `${Math.round(bom.utilization.optimalityPercent)}% (${bom.utilization.panelCount} placed, ${bom.utilization.optimalPanelCount} is the minimum)`,
