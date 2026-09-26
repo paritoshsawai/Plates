@@ -1,7 +1,7 @@
 import { Rect } from 'react-konva';
 import { AREA_DEPTH_UNITS, categoryColor, getPanelSpec } from '../core/panels';
 import type { Panel } from '../core/types';
-import { COLORS, PX_PER_UNIT, snapToGrid } from './view';
+import { COLORS, PX_PER_UNIT, selectHandlers, snapToGrid } from './view';
 
 interface Props {
   panel: Panel;
@@ -36,10 +36,7 @@ export function AreaShape({ panel, selected, flagged, draggable, onSelect, onMov
       strokeWidth={selected ? 2.5 : 1}
       draggable={draggable}
       dragBoundFunc={snapToGrid}
-      onMouseDown={(e) => {
-        e.cancelBubble = true;
-        onSelect(panel.id, e.evt.shiftKey);
-      }}
+      {...selectHandlers((additive) => onSelect(panel.id, additive))}
       onDragEnd={(e) => {
         const node = e.target;
         onMoved(panel.id, Math.round(node.x() / PX_PER_UNIT), Math.round(node.y() / PX_PER_UNIT));

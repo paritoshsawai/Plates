@@ -42,6 +42,8 @@ export const COLORS = {
   connector: '#475569',
 } as const;
 
+export type { Point } from '../core/gestures';
+
 export interface Viewport {
   scale: number;
   x: number;
@@ -107,18 +109,32 @@ export function visibleUnits(
   };
 }
 
+/**
+ * Zoom about a fixed screen point, so whatever is under it stays under it.
+ *
+ * Takes a factor rather than a wheel delta, because a pinch has no notion of
+ * a notch: the factor is the ratio the fingers moved apart by. The wheel path
+ * goes through `zoomAt`, which is this with a fixed step.
+ */
+export function zoomBy(
+  viewport: Viewport,
+  anchor: { x: number; y: number },
+  factor: number,
+): Viewport {
+  const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, viewport.scale * factor));
+  if (scale === viewport.scale) return viewport;
+  const worldX = (anchor.x - viewport.x) / viewport.scale;
+  const worldY = (anchor.y - viewport.y) / viewport.scale;
+  return { scale, x: anchor.x - worldX * scale, y: anchor.y - worldY * scale };
+}
+
 /** Zoom about the pointer so the point under the cursor stays put. */
 export function zoomAt(
   viewport: Viewport,
   pointer: { x: number; y: number },
   deltaY: number,
 ): Viewport {
-  const factor = deltaY > 0 ? 1 / 1.12 : 1.12;
-  const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, viewport.scale * factor));
-  if (scale === viewport.scale) return viewport;
-  const worldX = (pointer.x - viewport.x) / viewport.scale;
-  const worldY = (pointer.y - viewport.y) / viewport.scale;
-  return { scale, x: pointer.x - worldX * scale, y: pointer.y - worldY * scale };
+  return zoomBy(viewport, pointer, deltaY > 0 ? 1 / 1.12 : 1.12);
 }
 
 /** Fit a bounding box in grid units into a viewport of the given pixel size. */
@@ -214,4 +230,31 @@ export function planBoundsUnits(
     maxX: maxX + padUnits,
     maxY: maxY + padUnits,
   };
+}
+
+/**
+ * Handlers that make a shape selectable by both a mouse and a finger.
+ *
+ * Konva dispatches by pointer kind and never doubles up: a mouse gets
+ * `mousedown`, a finger gets `touchstart`. A shape wired only for the mouse -
+ * which is what every shape here was - simply cannot be picked on a
+ * touchscreen. Defined once so the two shape components cannot drift.
+ *
+ * `shiftKey` only exists on the mouse event, so additive selection is a
+ * mouse-only affordance; a tap replaces the selection, which is what a tap
+ * means everywhere else.
+ */
+export function selectHandlers(onPick: (additive: boolean) => void) {
+  // A touchscreen fires a compatibility mousedown after every touchstart. For a
+  // plain select that is merely redundant, but the same handler converts a wall
+  // into a door and back, so a doubled call would undo itself.
+  let lastTouchAt = 0;
+  const pick = (e: { cancelBubble: boolean; evt: MouseEvent | TouchEvent }) => {
+    const touch = 'touches' in e.evt;
+    if (touch) lastTouchAt = Date.now();
+    else if (Date.now() - lastTouchAt < 700) return;
+    e.cancelBubble = true;
+    onPick('shiftKey' in e.evt && e.evt.shiftKey);
+  };
+  return { onMouseDown: pick, onTouchStart: pick };
 }

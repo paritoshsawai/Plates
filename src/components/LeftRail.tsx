@@ -15,9 +15,20 @@ import { Button, SectionTitle } from './ui';
 interface Props {
   onEditPlot(): void;
   onEditUnderlay(): void;
+  /**
+   * Which half of the rail to render.
+   *
+   * On a desktop this is left alone and the whole rail shows, exactly as it
+   * always has. The bottom sheet uses it to put drawing and visibility behind
+   * separate tabs, because the full rail is eight sections and that is a long
+   * scroll on a phone.
+   */
+  only?: 'draw' | 'layers';
 }
 
-export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
+export function LeftRail({ onEditPlot, onEditUnderlay, only }: Props) {
+  const showDraw = only !== 'layers';
+  const showLayers = only !== 'draw';
   const tool = useStore((s) => s.tool);
   const setTool = useStore((s) => s.setTool);
   const brush = useStore((s) => s.brush);
@@ -58,6 +69,7 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
 
   return (
     <aside className="flex w-full shrink-0 flex-col gap-5 border-t border-slate-200 bg-white p-4 lg:w-60 lg:overflow-y-auto lg:border-t-0 lg:border-r">
+      {showDraw && (
       <section>
         <SectionTitle>Tools</SectionTitle>
         <div className="grid gap-1.5">
@@ -83,7 +95,9 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
           />
         </div>
       </section>
+      )}
 
+      {showDraw && (
       <section>
         <SectionTitle>Category</SectionTitle>
         <div className="grid gap-1.5">
@@ -112,7 +126,9 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
           area-tiling layer.
         </p>
       </section>
+      )}
 
+      {showDraw && (
       <section>
         <SectionTitle>Size</SectionTitle>
         <div className="grid gap-1.5">
@@ -147,7 +163,9 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
           common divisor of the two widths.
         </p>
       </section>
+      )}
 
+      {showLayers && (
       <section>
         <SectionTitle>Layers</SectionTitle>
         <div className="grid gap-1">
@@ -195,8 +213,9 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
           priced &mdash; it just gets out of the way so you can see underneath.
         </p>
       </section>
+      )}
 
-      {!readOnly && (
+      {!readOnly && showLayers && (
         <section>
           <SectionTitle>Floor &amp; roof</SectionTitle>
           <div className="grid gap-1.5">
@@ -262,7 +281,7 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
         </section>
       )}
 
-      {!readOnly && (
+      {!readOnly && showDraw && (
         <section>
           <SectionTitle>Openings</SectionTitle>
           <div className="grid gap-1.5">
@@ -308,7 +327,7 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
         </section>
       )}
 
-      {!readOnly && (
+      {!readOnly && showDraw && (
         <section>
           <SectionTitle>Selection</SectionTitle>
           <div className="flex flex-wrap gap-1.5">
@@ -335,6 +354,7 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
         </section>
       )}
 
+      {showDraw && (
       <section>
         <SectionTitle>Plot</SectionTitle>
         <dl className="space-y-1 text-xs text-slate-600">
@@ -351,6 +371,7 @@ export function LeftRail({ onEditPlot, onEditUnderlay }: Props) {
           </div>
         )}
       </section>
+      )}
     </aside>
   );
 }

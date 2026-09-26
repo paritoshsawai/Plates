@@ -10,6 +10,8 @@ import { PlotDialog } from './components/PlotDialog';
 import { PricingDialog } from './components/PricingDialog';
 import { UnderlayDialog } from './components/UnderlayDialog';
 import { CalibrationBanner } from './components/CalibrationBanner';
+import { Sheet } from './components/Sheet';
+import { useCompactLayout, usePhoneLayout } from './components/useMediaQuery';
 import { buildBom } from './core/bom';
 import { EXPORT_HIDDEN, PX_PER_UNIT, planBoundsUnits } from './canvas/view';
 import { serializePlan } from './core/plan';
@@ -50,6 +52,8 @@ export default function App() {
   const notify = useStore((s) => s.notify);
   const refreshSavedPlans = useStore((s) => s.refreshSavedPlans);
   const unit = useStore((s) => s.unit);
+  const compact = useCompactLayout();
+  const phone = usePhoneLayout();
 
   const validation = useMemo(
     () => validatePlan(plan.panels, plan.plot, unit),
@@ -303,7 +307,7 @@ export default function App() {
   return (
     // Full height on a desktop so the canvas fills the screen; on a narrow
     // screen the rails stack under the drawing and the page scrolls instead.
-    <div className="flex min-h-full flex-col bg-slate-100 text-slate-900 lg:h-full">
+    <div className="flex h-full flex-col bg-slate-100 text-slate-900">
       <TopBar
         exports={exports}
         onOpenPlans={() => setDialog('plans')}
@@ -315,13 +319,13 @@ export default function App() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        {role !== 'client' && (
+        {role !== 'client' && !compact && (
           <LeftRail
             onEditPlot={() => setDialog('plot')}
             onEditUnderlay={() => setDialog('underlay')}
           />
         )}
-        <main className="relative order-first flex min-h-[55vh] min-w-0 flex-1 flex-col lg:order-none lg:min-h-0">
+        <main className="relative order-first flex min-h-0 min-w-0 flex-1 flex-col lg:order-none">
           <div className="flex shrink-0 gap-1 border-b border-slate-200 bg-white px-2 py-1.5">
             {(['plan', '3d'] as const).map((id) => (
               <button
@@ -357,12 +361,26 @@ export default function App() {
               </Suspense>
             </div>
           )}
+          {compact && (
+            <Sheet
+              bom={bom}
+              validation={validation}
+              onEditPlot={() => setDialog('plot')}
+              onEditUnderlay={() => setDialog('underlay')}
+              onEditPricing={() => setDialog('pricing')}
+              // A phone is for reading the answer; a tablet has room to draw.
+              initialTab={phone ? 'materials' : 'tools'}
+              initiallyOpen={!phone}
+            />
+          )}
         </main>
-        <RightRail
-          bom={bom}
-          validation={validation}
-          onEditPricing={() => setDialog('pricing')}
-        />
+        {!compact && (
+          <RightRail
+            bom={bom}
+            validation={validation}
+            onEditPricing={() => setDialog('pricing')}
+          />
+        )}
       </div>
 
       {dialog === 'plot' && <PlotDialog onClose={() => setDialog(null)} />}

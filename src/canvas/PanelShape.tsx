@@ -2,7 +2,7 @@ import { Arc, Group, Line, Rect } from 'react-konva';
 import { categoryColor, getPanelSpec } from '../core/panels';
 import { isOpeningCategory } from '../core/types';
 import type { Panel } from '../core/types';
-import { COLORS, PX_PER_UNIT, WALL_PX, snapToGrid } from './view';
+import { COLORS, PX_PER_UNIT, WALL_PX, selectHandlers, snapToGrid } from './view';
 
 interface Props {
   panel: Panel;
@@ -34,10 +34,7 @@ export function PanelShape({ panel, selected, flagged, draggable, onSelect, onMo
       y={panel.y * PX_PER_UNIT}
       draggable={draggable}
       dragBoundFunc={snapToGrid}
-      onMouseDown={(e) => {
-        e.cancelBubble = true;
-        onSelect(panel.id, e.evt.shiftKey);
-      }}
+      {...selectHandlers((additive) => onSelect(panel.id, additive))}
       onDragEnd={(e) => {
         const node = e.target;
         onMoved(

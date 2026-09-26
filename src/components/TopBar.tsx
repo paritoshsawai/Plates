@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useCompactLayout } from './useMediaQuery';
 import { useStore } from '../state/store';
 import type { Role } from '../state/store';
 import type { LengthUnit } from '../core/units';
@@ -35,7 +36,11 @@ export function TopBar({ exports, onOpenPlans, onOpenPricing, onNewPlan }: Props
   const future = useStore((s) => s.future.length);
 
   const [exportOpen, setExportOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  // Nine controls and a text field wrap to five rows on a phone, which cost
+  // 380 px of an 844 px screen. Below lg the file actions fold into a menu.
+  const compact = useCompactLayout();
 
   const readOnly = role === 'client';
 
@@ -53,7 +58,7 @@ export function TopBar({ exports, onOpenPlans, onOpenPricing, onNewPlan }: Props
         onChange={(e) => setPlanName(e.target.value)}
         readOnly={readOnly}
         aria-label="Plan name"
-        className="w-52 rounded border border-transparent px-2 py-1 text-sm font-medium text-slate-800 hover:border-slate-200 focus:border-blue-500 focus:outline-none read-only:hover:border-transparent"
+        className="w-32 min-w-0 flex-1 rounded border border-transparent px-2 py-1 text-sm font-medium text-slate-800 hover:border-slate-200 focus:border-blue-500 focus:outline-none read-only:hover:border-transparent lg:w-52 lg:flex-none"
       />
       <span className="text-xs text-slate-400">
         v{plan.version}
@@ -69,17 +74,26 @@ export function TopBar({ exports, onOpenPlans, onOpenPricing, onNewPlan }: Props
             <Button onClick={redo} disabled={future === 0} title="Ctrl+Shift+Z">
               Redo
             </Button>
-            <div className="mx-1 h-5 w-px bg-slate-200" />
-            <Button onClick={onNewPlan}>New</Button>
           </>
         )}
-        <Button onClick={onOpenPlans}>Open</Button>
-        {!readOnly && (
+
+        {!compact && (
           <>
-            <Button onClick={() => fileInput.current?.click()}>Import</Button>
-            <Button variant="primary" onClick={saveVersion}>
-              Save version
-            </Button>
+            {!readOnly && (
+              <>
+                <div className="mx-1 h-5 w-px bg-slate-200" />
+                <Button onClick={onNewPlan}>New</Button>
+              </>
+            )}
+            <Button onClick={onOpenPlans}>Open</Button>
+            {!readOnly && (
+              <>
+                <Button onClick={() => fileInput.current?.click()}>Import</Button>
+                <Button variant="primary" onClick={saveVersion}>
+                  Save version
+                </Button>
+              </>
+            )}
           </>
         )}
 
@@ -134,14 +148,87 @@ export function TopBar({ exports, onOpenPlans, onOpenPricing, onNewPlan }: Props
           )}
         </div>
 
-        {role === 'admin' && <Button onClick={onOpenPricing}>Pricing</Button>}
+        {role === 'admin' && !compact && <Button onClick={onOpenPricing}>Pricing</Button>}
 
         <UnitSwitch unit={unit} onChange={setUnit} />
+
+        {compact && (
+          <div className="relative">
+            <Button onClick={() => setMoreOpen((open) => !open)} title="More actions">
+              &#8943;
+            </Button>
+            {moreOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setMoreOpen(false)} />
+                <div className="absolute right-0 z-20 mt-1 w-52 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                  {!readOnly && (
+                    <MenuItem
+                      label="Save version"
+                      onClick={() => {
+                        saveVersion();
+                        setMoreOpen(false);
+                      }}
+                    />
+                  )}
+                  <MenuItem
+                    label="Open…"
+                    onClick={() => {
+                      onOpenPlans();
+                      setMoreOpen(false);
+                    }}
+                  />
+                  {!readOnly && (
+                    <>
+                      <MenuItem
+                        label="Import…"
+                        onClick={() => {
+                          fileInput.current?.click();
+                          setMoreOpen(false);
+                        }}
+                      />
+                      <MenuItem
+                        label="New plan"
+                        onClick={() => {
+                          onNewPlan();
+                          setMoreOpen(false);
+                        }}
+                      />
+                    </>
+                  )}
+                  {role === 'admin' && (
+                    <MenuItem
+                      label="Pricing…"
+                      onClick={() => {
+                        onOpenPricing();
+                        setMoreOpen(false);
+                      }}
+                    />
+                  )}
+                  <div className="my-1 border-t border-slate-200" />
+                  <label className="block px-3 py-2 text-xs text-slate-500">
+                    View as
+                    <select
+                      value={role}
+                      onChange={(e) => setRole(e.target.value as Role)}
+                      aria-label="Role"
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="architect">Architect</option>
+                      <option value="admin">Admin</option>
+                      <option value="client">Client (read-only)</option>
+                    </select>
+                  </label>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         <select
           value={role}
           onChange={(e) => setRole(e.target.value as Role)}
           aria-label="Role"
+          hidden={compact}
           className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 focus:border-blue-500 focus:outline-none"
         >
           <option value="architect">Architect</option>
@@ -206,6 +293,18 @@ function UnitSwitch({
         </button>
       ))}
     </div>
+  );
+}
+
+function MenuItem({ label, onClick }: { label: string; onClick(): void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="block min-h-11 w-full px-3 py-2 text-left text-sm text-slate-800 hover:bg-slate-50"
+    >
+      {label}
+    </button>
   );
 }
 
