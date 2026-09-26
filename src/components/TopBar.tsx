@@ -13,14 +13,25 @@ export interface ExportActions {
   workOrderJson(): void;
 }
 
+export type View = 'plan' | '3d';
+
 interface Props {
   exports: ExportActions;
+  view: View;
+  onSetView(view: View): void;
   onOpenPlans(): void;
   onOpenPricing(): void;
   onNewPlan(): void;
 }
 
-export function TopBar({ exports, onOpenPlans, onOpenPricing, onNewPlan }: Props) {
+export function TopBar({
+  exports,
+  view,
+  onSetView,
+  onOpenPlans,
+  onOpenPricing,
+  onNewPlan,
+}: Props) {
   const plan = useStore((s) => s.plan);
   const dirty = useStore((s) => s.dirty);
   const role = useStore((s) => s.role);
@@ -44,6 +55,22 @@ export function TopBar({ exports, onOpenPlans, onOpenPricing, onNewPlan }: Props
 
   const readOnly = role === 'client';
 
+  /**
+   * The exports, defined once.
+   *
+   * A desktop shows them in their own dropdown with a hint under each; a
+   * narrow bar folds them into the overflow menu, where a dedicated Export
+   * button was costing a row it did not earn. Listing them twice would be two
+   * places to forget when a sixth export arrives.
+   */
+  const exportItems: Array<{ label: string; hint: string; run(): void }> = [
+    { label: 'Quote PDF', hint: 'Drawing, BOM and estimate', run: () => void exports.pdf() },
+    { label: 'Plan PNG', hint: 'The drawing on its own', run: () => exports.png() },
+    { label: 'BOM CSV', hint: 'Counts, costs, utilisation', run: () => exports.csv() },
+    { label: 'Plan JSON', hint: 'Round-trips back via Import', run: () => exports.planJson() },
+    { label: 'Work order JSON', hint: 'The ERP payload', run: () => exports.workOrderJson() },
+  ];
+
   return (
     <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-200 bg-white px-4 py-2.5">
       <div className="flex items-baseline gap-2">
@@ -64,6 +91,24 @@ export function TopBar({ exports, onOpenPlans, onOpenPricing, onNewPlan }: Props
         v{plan.version}
         {dirty && ' · unsaved'}
       </span>
+
+      {/* The view switch lives here rather than on a strip of its own: that
+          strip cost a whole row on a phone and the header has the space. */}
+      <div className="flex gap-1">
+        {(['plan', '3d'] as const).map((id) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onSetView(id)}
+            aria-pressed={view === id}
+            className={`rounded px-2.5 py-1.5 text-sm font-medium transition ${
+              view === id ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            {id === 'plan' ? 'Plan' : '3D'}
+          </button>
+        ))}
+      </div>
 
       <div className="ml-auto flex flex-wrap items-center gap-1.5">
         {!readOnly && (
@@ -97,56 +142,29 @@ export function TopBar({ exports, onOpenPlans, onOpenPricing, onNewPlan }: Props
           </>
         )}
 
-        <div className="relative">
-          <Button onClick={() => setExportOpen((open) => !open)}>Export &#9662;</Button>
-          {exportOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setExportOpen(false)} />
-              <div className="absolute right-0 z-20 mt-1 w-56 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg">
-                <ExportItem
-                  label="Quote PDF"
-                  hint="Drawing, BOM and estimate"
-                  onClick={() => {
-                    exports.pdf();
-                    setExportOpen(false);
-                  }}
-                />
-                <ExportItem
-                  label="Plan PNG"
-                  hint="The drawing on its own"
-                  onClick={() => {
-                    exports.png();
-                    setExportOpen(false);
-                  }}
-                />
-                <ExportItem
-                  label="BOM CSV"
-                  hint="Counts, costs, utilisation"
-                  onClick={() => {
-                    exports.csv();
-                    setExportOpen(false);
-                  }}
-                />
-                <ExportItem
-                  label="Plan JSON"
-                  hint="Round-trips back via Import"
-                  onClick={() => {
-                    exports.planJson();
-                    setExportOpen(false);
-                  }}
-                />
-                <ExportItem
-                  label="Work order JSON"
-                  hint="The ERP payload"
-                  onClick={() => {
-                    exports.workOrderJson();
-                    setExportOpen(false);
-                  }}
-                />
-              </div>
-            </>
-          )}
-        </div>
+        {!compact && (
+          <div className="relative">
+            <Button onClick={() => setExportOpen((open) => !open)}>Export &#9662;</Button>
+            {exportOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setExportOpen(false)} />
+                <div className="absolute right-0 z-20 mt-1 w-56 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                  {exportItems.map((item) => (
+                    <ExportItem
+                      key={item.label}
+                      label={item.label}
+                      hint={item.hint}
+                      onClick={() => {
+                        item.run();
+                        setExportOpen(false);
+                      }}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {role === 'admin' && !compact && <Button onClick={onOpenPricing}>Pricing</Button>}
 
@@ -161,6 +179,17 @@ export function TopBar({ exports, onOpenPlans, onOpenPricing, onNewPlan }: Props
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setMoreOpen(false)} />
                 <div className="absolute right-0 z-20 mt-1 w-52 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                  {exportItems.map((item) => (
+                    <MenuItem
+                      key={item.label}
+                      label={item.label}
+                      onClick={() => {
+                        item.run();
+                        setMoreOpen(false);
+                      }}
+                    />
+                  ))}
+                  <div className="my-1 border-t border-slate-200" />
                   {!readOnly && (
                     <MenuItem
                       label="Save version"

@@ -312,6 +312,8 @@ export default function App() {
     <div className="flex h-full flex-col bg-slate-100 text-slate-900">
       <TopBar
         exports={exports}
+        view={view}
+        onSetView={setView}
         onOpenPlans={() => setDialog('plans')}
         onOpenPricing={() => setDialog('pricing')}
         onNewPlan={() => {
@@ -328,20 +330,6 @@ export default function App() {
           />
         )}
         <main className="relative order-first flex min-h-0 min-w-0 flex-1 flex-col lg:order-none">
-          <div className="flex shrink-0 gap-1 border-b border-slate-200 bg-white px-2 py-1.5">
-            {(['plan', '3d'] as const).map((id) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setView(id)}
-                className={`rounded px-2.5 py-1 text-xs font-medium transition ${
-                  view === id ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {id === 'plan' ? 'Plan' : '3D'}
-              </button>
-            ))}
-          </div>
 
           {/* The plan canvas stays mounted: unmounting Konva would lose the
               viewport, and the PDF export captures its stage. */}

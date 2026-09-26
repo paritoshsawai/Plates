@@ -36,6 +36,7 @@ import type { Viewport } from './view';
 import { plotBboxUnits } from '../core/plot';
 import { isInsidePlot, wouldOverlap } from '../core/validation';
 import {
+  CATEGORY_STYLE,
   newPanelId,
   panelBoundsUnits,
   rectsIntersect,
@@ -53,8 +54,6 @@ import { useCoarsePointer } from '../components/useMediaQuery';
 // pan. This is the documented switch for multi-touch.
 KonvaGlobal.hitOnDragEnabled = true;
 import { AreaReadout } from '../components/AreaReadout';
-import { SlideToDelete } from '../components/SlideToDelete';
-import { CATEGORY_STYLE } from '../core/panels';
 import type { PlanAreas } from '../components/AreaReadout';
 import { useStore } from '../state/store';
 import type { Tool } from '../state/store';
@@ -663,6 +662,29 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
     );
   };
 
+  /**
+   * Screen position for the held panel's bubble: the middle of its top edge,
+   * in container pixels, clamped so a panel against an edge still shows one.
+   *
+   * The panel's own geometry rather than the touch point, so the bubble points
+   * at the thing it is about even after the finger has moved.
+   */
+  const heldBubblePosition = (() => {
+    if (!heldPanel) return undefined;
+    const rect = panelBoundsUnits(heldPanel);
+    const toScreen = (units: number, offset: number) =>
+      offset + units * PX_PER_UNIT * viewport.scale;
+    const MARGIN_PX = 12;
+    const BUBBLE_HALF_WIDTH_PX = 90;
+    return {
+      left: Math.min(
+        Math.max(toScreen(rect.x + rect.width / 2, viewport.x), BUBBLE_HALF_WIDTH_PX),
+        Math.max(BUBBLE_HALF_WIDTH_PX, size.width - BUBBLE_HALF_WIDTH_PX),
+      ),
+      top: Math.max(toScreen(rect.y, viewport.y) - MARGIN_PX, 60),
+    };
+  })();
+
   const cursor = calibration.active
     ? 'crosshair'
     : openingBrush
@@ -864,22 +886,30 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
 
       {heldPanel && (
         <>
+          {/* Catches the dismissing tap. Deliberately not dimmed: the point of
+              putting this over the panel is that you can still see the panel. */}
+          <div className="absolute inset-0 z-40" onPointerDown={() => setHeldPanelId(null)} />
           <div
-            className="absolute inset-0 z-40 bg-slate-900/30"
-            onPointerDown={() => setHeldPanelId(null)}
-          />
-          <div
-            className="absolute inset-x-0 bottom-0 z-40 rounded-t-2xl border-t border-slate-200 bg-white p-4 shadow-2xl"
-            style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+            className="absolute z-40 -translate-x-1/2 -translate-y-full"
+            style={heldBubblePosition}
           >
-            <SlideToDelete
-              label={`Delete this ${CATEGORY_STYLE[heldPanel.category].label.toLowerCase()}?`}
-              onConfirm={() => {
-                setHeldPanelId(null);
-                deleteSelection();
-              }}
-              onCancel={() => setHeldPanelId(null)}
-            />
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-lg">
+              <span className="whitespace-nowrap pl-1 text-xs text-slate-600">
+                {CATEGORY_STYLE[heldPanel.category].label}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setHeldPanelId(null);
+                  deleteSelection();
+                }}
+                className="min-h-11 rounded-md bg-red-600 px-3 text-sm font-medium text-white"
+              >
+                Delete
+              </button>
+            </div>
+            {/* The tail, pointing down at the panel. */}
+            <div className="mx-auto -mt-px h-2 w-3 bg-white [clip-path:polygon(0_0,100%_0,50%_100%)]" />
           </div>
         </>
       )}

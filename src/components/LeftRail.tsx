@@ -76,16 +76,6 @@ export function LeftRail({ onEditPlot, onEditUnderlay, only }: Props) {
         <SectionTitle>Tools</SectionTitle>
         <div className="grid gap-1.5">
           <ToolButton
-            active={tool === 'pan'}
-            onClick={() => setTool('pan')}
-            label="Move the map"
-            hint={
-              touch
-                ? 'Drag anywhere to move the drawing around. Nothing is placed or changed.'
-                : 'Drag anywhere to move the drawing around. Right-drag does the same from any tool.'
-            }
-          />
-          <ToolButton
             active={tool === 'room'}
             disabled={readOnly}
             onClick={() => setTool('room')}
@@ -216,18 +206,21 @@ export function LeftRail({ onEditPlot, onEditUnderlay, only }: Props) {
                     </span>
                     <span className="text-xs tabular-nums text-slate-500">{count}</span>
                   </div>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    <Button onClick={() => fillArea(category, areaAxis[category])}>
-                      {count > 0 ? 'Refill' : 'Fill'}
-                    </Button>
-                    {count > 0 && (
-                      <Button variant="danger" onClick={() => clearArea(category)}>
-                        Clear
+                  {/* Fill and Strips share a row: each was only a third of the
+                      width, so two rows made every card half again as tall. */}
+                  <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1.5">
+                    <div className="flex flex-wrap gap-1.5">
+                      <Button onClick={() => fillArea(category, areaAxis[category])}>
+                        {count > 0 ? 'Refill' : 'Fill'}
                       </Button>
-                    )}
-                  </div>
-                  <div className="mt-1.5 flex items-center gap-1.5">
-                    <span className="text-xs text-slate-500">Strips</span>
+                      {count > 0 && (
+                        <Button variant="danger" onClick={() => clearArea(category)}>
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-slate-500">Strips</span>
                     {(
                       [
                         ['h', '\u2194', 'across'],
@@ -247,9 +240,10 @@ export function LeftRail({ onEditPlot, onEditUnderlay, only }: Props) {
                             : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
                         }`}
                       >
-                        {glyph}
-                      </button>
-                    ))}
+                          {glyph}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               );
