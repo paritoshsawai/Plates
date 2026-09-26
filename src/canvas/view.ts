@@ -128,6 +128,28 @@ export function zoomBy(
   return { scale, x: anchor.x - worldX * scale, y: anchor.y - worldY * scale };
 }
 
+/** Slide the viewport by a screen-pixel offset. The zoom is untouched. */
+export function panBy(viewport: Viewport, dx: number, dy: number): Viewport {
+  if (dx === 0 && dy === 0) return viewport;
+  return { ...viewport, x: viewport.x + dx, y: viewport.y + dy };
+}
+
+/**
+ * What a wheel event means: move the drawing, or zoom it.
+ *
+ * A trackpad pinch reaches the page as a wheel event with `ctrlKey` set -
+ * there is no separate gesture event - and that is the only thing that
+ * reliably separates the two. So pinch zooms and everything else pans, which
+ * is what a two-finger scroll does in every other map-like tool.
+ *
+ * Kept pure and separate because the alternative, sniffing the delta's
+ * magnitude to guess at mouse-versus-trackpad, is a heuristic that is wrong on
+ * some hardware and cannot be tested honestly.
+ */
+export function wheelIntent(ctrlKey: boolean, metaKey: boolean): 'zoom' | 'pan' {
+  return ctrlKey || metaKey ? 'zoom' : 'pan';
+}
+
 /** Zoom about the pointer so the point under the cursor stays put. */
 export function zoomAt(
   viewport: Viewport,

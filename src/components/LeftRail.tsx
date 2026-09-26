@@ -76,6 +76,16 @@ export function LeftRail({ onEditPlot, onEditUnderlay, only }: Props) {
         <SectionTitle>Tools</SectionTitle>
         <div className="grid gap-1.5">
           <ToolButton
+            active={tool === 'pan'}
+            onClick={() => setTool('pan')}
+            label="Move the map"
+            hint={
+              touch
+                ? 'Drag anywhere to move the drawing around. Nothing is placed or changed.'
+                : 'Drag anywhere to move the drawing around. Right-drag does the same from any tool.'
+            }
+          />
+          <ToolButton
             active={tool === 'room'}
             disabled={readOnly}
             onClick={() => setTool('room')}
@@ -111,7 +121,7 @@ export function LeftRail({ onEditPlot, onEditUnderlay, only }: Props) {
             hint={
               touch
                 ? 'Tap a panel to select it. Hold one down for more, including delete.'
-                : 'Drag a panel to move it, or drag the background to box-select. Hold Space to pan.'
+                : 'Drag a panel to move it, or drag the background to box-select. Right-drag moves the map.'
             }
           />
         </div>

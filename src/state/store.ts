@@ -30,7 +30,7 @@ import {
 } from './storage';
 import type { PlanSummary } from './storage';
 
-export type Tool = 'select' | 'wall' | 'panel' | 'room';
+export type Tool = 'select' | 'wall' | 'panel' | 'room' | 'pan';
 
 /**
  * Who is using the tool. This is a UI affordance, not access control - it

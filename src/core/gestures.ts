@@ -36,3 +36,21 @@ export function midpoint(
 ): Point {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
+
+/**
+ * A wheel event's delta in CSS pixels.
+ *
+ * `deltaY` alone is not comparable between devices. A mouse wheel notch is one
+ * event of about 100; a trackpad two-finger scroll is a stream of events of 1
+ * to 4. Firefox reports lines (`deltaMode` 1) rather than pixels, and a
+ * page-scroll wheel reports pages (2). Reading only the *sign*, as this did
+ * before, gives a trackpad flick the same authority as twenty wheel notches.
+ */
+export function normalizeWheelDelta(deltaY: number, deltaMode = 0): number {
+  const perUnit = deltaMode === 1 ? LINE_HEIGHT_PX : deltaMode === 2 ? PAGE_HEIGHT_PX : 1;
+  return deltaY * perUnit;
+}
+
+/** Rough CSS pixels per line and per page, for normalising `deltaMode`. */
+const LINE_HEIGHT_PX = 16;
+const PAGE_HEIGHT_PX = 100;

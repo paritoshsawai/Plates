@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { zoomAt, zoomBy } from '../view';
+import { panBy, wheelIntent, zoomAt, zoomBy } from '../view';
 import { midpoint, pinchFactor, pointerDistance } from '../../core/gestures';
 import type { Viewport } from '../view';
 
@@ -140,5 +140,61 @@ describe('the wheel still behaves exactly as it did', () => {
     const p = { x: 140, y: 60 };
     expect(zoomAt(v, p, -1)).toEqual(zoomBy(v, p, 1.12));
     expect(zoomAt(v, p, 1)).toEqual(zoomBy(v, p, 1 / 1.12));
+  });
+});
+
+describe('panBy', () => {
+  it('slides the viewport without touching the zoom', () => {
+    const before = at(1.7, 40, -20);
+    const after = panBy(before, 30, -12);
+    expect(after).toEqual({ scale: 1.7, x: 70, y: -32 });
+  });
+
+  it('is exactly reversible, so a pan and back leaves no drift', () => {
+    const before = at(0.83, 11, 92);
+    expect(panBy(panBy(before, 137, -56), -137, 56)).toEqual(before);
+  });
+
+  it('does nothing for a zero offset', () => {
+    const v = at(1, 5, 5);
+    expect(panBy(v, 0, 0)).toBe(v);
+  });
+});
+
+describe('wheelIntent', () => {
+  it('reads a trackpad pinch, which arrives as ctrl+wheel, as a zoom', () => {
+    expect(wheelIntent(true, false)).toBe('zoom');
+  });
+
+  it('treats the command key the same, for Mac browsers that send it', () => {
+    expect(wheelIntent(false, true)).toBe('zoom');
+  });
+
+  it('treats a plain scroll as a pan', () => {
+    expect(wheelIntent(false, false)).toBe('pan');
+  });
+});
+
+describe('a sideways two-finger swipe', () => {
+  /**
+   * The regression this phase exists for. The wheel handler fed `deltaY`
+   * straight to `zoomAt` and ignored `deltaX` entirely, so a horizontal swipe
+   * arrived with `deltaY` at 0 - and `deltaY > 0` being false took the
+   * zoom-*in* branch. Swiping sideways to look along a wall zoomed in, every
+   * time, and there was no way to pan sideways at all.
+   */
+  it('moves the drawing sideways and leaves the zoom alone', () => {
+    const before = at(1, 0, 0);
+    const after =
+      wheelIntent(false, false) === 'pan' ? panBy(before, -80, 0) : zoomAt(before, { x: 0, y: 0 }, 0);
+
+    expect(after.scale).toBe(before.scale);
+    expect(after.x).not.toBe(before.x);
+  });
+
+  it('is what the old behaviour got wrong: a zero deltaY zoomed in', () => {
+    // Kept as a statement of the bug rather than of the fix, so the reason the
+    // handler now branches on intent is legible from the tests alone.
+    expect(zoomAt(at(1, 0, 0), { x: 0, y: 0 }, 0).scale).toBeGreaterThan(1);
   });
 });

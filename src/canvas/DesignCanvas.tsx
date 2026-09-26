@@ -25,11 +25,13 @@ import {
   fitToBox,
   nearestEdge,
   nearestNode,
+  panBy,
   visibleUnits,
+  wheelIntent,
   zoomAt,
   zoomBy,
 } from './view';
-import { midpoint, pinchFactor, pointerDistance } from '../core/gestures';
+import { midpoint, normalizeWheelDelta, pinchFactor, pointerDistance } from '../core/gestures';
 import type { Viewport } from './view';
 import { plotBboxUnits } from '../core/plot';
 import { isInsidePlot, wouldOverlap } from '../core/validation';
@@ -55,6 +57,7 @@ import { SlideToDelete } from '../components/SlideToDelete';
 import { CATEGORY_STYLE } from '../core/panels';
 import type { PlanAreas } from '../components/AreaReadout';
 import { useStore } from '../state/store';
+import type { Tool } from '../state/store';
 import { isLinearCategory } from '../core/types';
 import type { GridEdge, GridPoint, Panel, ValidationResult } from '../core/types';
 import type { UnitRect } from '../core/panels';
@@ -65,6 +68,28 @@ interface Props {
   stageRef: React.RefObject<Konva.Stage | null>;
 }
 
+/** A hand, for the button that grabs the drawing. */
+function HandIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11" />
+      <path d="M11 11V4.5a1.5 1.5 0 0 1 3 0V11" />
+      <path d="M14 11.5V6.5a1.5 1.5 0 0 1 3 0V15" />
+      <path d="M17 12a1.5 1.5 0 0 1 3 0v3a6 6 0 0 1-6 6h-2a6 6 0 0 1-5.2-3L5 15.2a1.5 1.5 0 0 1 2.6-1.5L8.6 15" />
+    </svg>
+  );
+}
+
 export function DesignCanvas({ validation, areas, stageRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
@@ -73,6 +98,8 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
   const [hoverEdge, setHoverEdge] = useState<GridEdge | null>(null);
   const [hoverRaw, setHoverRaw] = useState<GridPoint | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
+  /** True while a pan drag is live, so the cursor can close its hand. */
+  const [dragging, setDragging] = useState(false);
   /**
    * Whether `size` is a real measurement yet, rather than the placeholder.
    *
@@ -110,6 +137,7 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
   const selection = useStore((s) => s.selection);
   const wallAnchor = useStore((s) => s.wallAnchor);
   const setWallAnchor = useStore((s) => s.setWallAnchor);
+  const setTool = useStore((s) => s.setTool);
   const autoFillRun = useStore((s) => s.autoFillRun);
   const addPanels = useStore((s) => s.addPanels);
   const movePanel = useStore((s) => s.movePanel);
@@ -134,6 +162,25 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
    * opens the actions for it.
    */
   const [heldPanelId, setHeldPanelId] = useState<string | null>(null);
+
+  /**
+   * The tool to come back to when the hand is switched off.
+   *
+   * Local rather than in the store: which tool you were using before you
+   * grabbed the map is a fact about this pane, not about the drawing. It
+   * matters most on a phone, where the tool list is behind the bottom sheet -
+   * without a toggle, repositioning costs open-sheet, switch, pan, open-sheet,
+   * switch back.
+   */
+  const toolBeforePan = useRef<Tool>('select');
+  const togglePan = () => {
+    if (tool === 'pan') {
+      setTool(toolBeforePan.current);
+      return;
+    }
+    toolBeforePan.current = tool;
+    setTool('pan');
+  };
   const holdEnabled = coarsePointer && tool === 'select' && !openingBrush;
   const heldPanel = heldPanelId ? plan.panels.find((p) => p.id === heldPanelId) : undefined;
 
@@ -166,6 +213,12 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  /** The +/- buttons zoom about the centre of what you are looking at. */
+  const zoomStep = (factor: number) =>
+    setViewport((current) =>
+      zoomBy(current, { x: size.width / 2, y: size.height / 2 }, factor),
+    );
 
   const fitToPlot = useCallback(() => {
     setViewport(fitToBox(plotBboxUnits(plan.plot), size.width, size.height));
@@ -218,9 +271,12 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
    * Except in the drawing tools, where the finger is drawing. There two
    * fingers pan and zoom instead, which the pinch handler does on its own
    * without the stage being draggable at all.
+   *
+   * The Hand tool is the way out of all of that: it pans with whatever you
+   * have, in one gesture, without a modifier key or a second finger.
    */
   const drawingTool = tool === 'wall' || tool === 'room';
-  const panning = spaceHeld || (coarsePointer && !drawingTool);
+  const panning = tool === 'pan' || spaceHeld || (coarsePointer && !drawingTool);
 
   // Middle-drag pans from anywhere, including over a panel, so it works even
   // when the canvas is full. Konva's own stage drag cannot be limited to one
@@ -236,6 +292,7 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
       }));
     };
     const up = () => {
+      if (panStart.current) setDragging(false);
       panStart.current = null;
       // The stage only sees a release over itself; this catches the rest.
       finishMarquee.current();
@@ -502,8 +559,11 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
     const stage = e.target.getStage();
     if (!stage) return;
 
-    if (e.evt.button === 1) {
+    // Right and middle drag pan from anywhere, including over a panel and
+    // mid-draw, which is what the 3D view has always done.
+    if (e.evt.button === 1 || e.evt.button === 2) {
       e.evt.preventDefault();
+      setDragging(true);
       panStart.current = {
         screenX: e.evt.clientX,
         screenY: e.evt.clientY,
@@ -574,12 +634,33 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
     select(start.additive ? [...new Set([...selection, ...hits])] : hits);
   };
 
+  /**
+   * The wheel, which on a laptop is a trackpad.
+   *
+   * A two-finger scroll moves the drawing and a pinch zooms it, the way every
+   * map-like tool behaves. Before this, every wheel event zoomed and `deltaX`
+   * was dropped on the floor - so a sideways swipe arrived with `deltaY` at 0
+   * and zoomed *in*, because that is the branch `deltaY > 0` falls to.
+   */
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
     const stage = e.target.getStage();
     const pointer = stage?.getPointerPosition();
     if (!pointer) return;
-    setViewport((current) => zoomAt(current, pointer, e.evt.deltaY));
+
+    const { deltaX, deltaY, deltaMode, ctrlKey, metaKey } = e.evt;
+    if (wheelIntent(ctrlKey, metaKey) === 'zoom') {
+      setViewport((current) => zoomAt(current, pointer, deltaY));
+      return;
+    }
+    // Scrolling down moves the content up, so the offsets are negated.
+    setViewport((current) =>
+      panBy(
+        current,
+        -normalizeWheelDelta(deltaX, deltaMode),
+        -normalizeWheelDelta(deltaY, deltaMode),
+      ),
+    );
   };
 
   const cursor = calibration.active
@@ -587,7 +668,9 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
     : openingBrush
       ? 'cell'
       : panning
-        ? 'grab'
+        ? dragging
+          ? 'grabbing'
+          : 'grab'
         : drawingTool
           ? 'crosshair'
           : tool === 'select'
@@ -611,7 +694,9 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
         x={viewport.x}
         y={viewport.y}
         draggable={panning}
+        onDragStart={() => setDragging(true)}
         onDragEnd={(e) => {
+          setDragging(false);
           if (e.target !== e.target.getStage()) return;
           setViewport((current) => ({ ...current, x: e.target.x(), y: e.target.y() }));
         }}
@@ -765,11 +850,15 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
           <AreaReadout areas={areas} unit={unit} />
         </div>
         <span className="pointer-events-auto rounded bg-white/90 px-2 py-1 text-slate-600 ring-1 ring-slate-200">
-          {coarsePointer
-            ? drawingTool
-              ? 'Drag to draw \u00b7 two fingers to pan and zoom'
-              : 'Drag to pan \u00b7 pinch to zoom \u00b7 tap to place or select'
-            : 'Scroll to zoom \u00b7 drag to select \u00b7 Space or middle-drag to pan'}
+          {tool === 'pan'
+            ? coarsePointer
+              ? 'Drag to move the drawing \u00b7 pinch to zoom'
+              : 'Drag to move the drawing \u00b7 scroll to move \u00b7 pinch or \u2318-scroll to zoom'
+            : coarsePointer
+              ? drawingTool
+                ? 'Drag to draw \u00b7 two fingers to move and zoom'
+                : 'Drag to pan \u00b7 pinch to zoom \u00b7 tap to place or select'
+              : 'Scroll to move \u00b7 pinch to zoom \u00b7 right-drag or Space to pan'}
         </span>
       </div>
 
@@ -795,14 +884,52 @@ export function DesignCanvas({ validation, areas, stageRef }: Props) {
         </>
       )}
 
-      <button
-        type="button"
-        onClick={fitToPlot}
-        className="absolute right-3 top-3 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-        style={{ color: COLORS.label }}
-      >
-        Fit to plot
-      </button>
+      {/* Viewport controls. On a phone the tool list is behind the sheet, so
+          moving and zooming the drawing has to be reachable from the canvas
+          itself. The +/- buttons also give a mouse back the zoom it lost when
+          the wheel became a pan. */}
+      <div className="absolute right-3 top-3 flex items-start gap-1.5">
+        <button
+          type="button"
+          onClick={togglePan}
+          aria-pressed={tool === 'pan'}
+          aria-label="Move the map"
+          title="Move the map (H)"
+          className={`rounded border px-2.5 py-1.5 text-sm shadow-sm ${
+            tool === 'pan'
+              ? 'border-slate-900 bg-slate-900 text-white'
+              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          <HandIcon />
+        </button>
+        <div className="flex flex-col overflow-hidden rounded border border-slate-300 bg-white shadow-sm">
+          <button
+            type="button"
+            onClick={() => zoomStep(1.25)}
+            aria-label="Zoom in"
+            className="px-2.5 py-1.5 text-sm leading-none text-slate-700 hover:bg-slate-50"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={() => zoomStep(1 / 1.25)}
+            aria-label="Zoom out"
+            className="border-t border-slate-200 px-2.5 py-1.5 text-sm leading-none text-slate-700 hover:bg-slate-50"
+          >
+            &minus;
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={fitToPlot}
+          className="rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+          style={{ color: COLORS.label }}
+        >
+          Fit to plot
+        </button>
+      </div>
     </div>
   );
 }
